@@ -914,10 +914,14 @@ impl super::Adapter {
 
         let mut workarounds = super::Workarounds::empty();
 
+        let use_client_memory_staging_buffers = cfg!(any(webgl, Emscripten, target_os = "android"));
         workarounds.set(
             super::Workarounds::EMULATE_BUFFER_MAP,
-            cfg!(any(webgl, Emscripten)),
+            use_client_memory_staging_buffers,
         );
+        if cfg!(target_os = "android") {
+            log::info!("Using client-memory staging buffers on Android GLES");
+        }
 
         let r = renderer.to_lowercase();
         // Check for Mesa sRGB clear bug. See
