@@ -7,6 +7,7 @@ pub fn all_tests(vec: &mut Vec<GpuTestInitializer>) {
         EMPTY_BUFFER_READ,
         EMPTY_BUFFER_READ_WRITE,
         MAP_OFFSET,
+        READBACK_REMAP_AFTER_GPU_WRITE,
         MAP_WITHOUT_SUBMIT,
         MINIMUM_BUFFER_BINDING_SIZE_LAYOUT,
         MINIMUM_BUFFER_BINDING_SIZE_DISPATCH,
@@ -222,6 +223,49 @@ static MAP_OFFSET: GpuTestConfiguration = GpuTestConfiguration::new()
         for byte in &view[48..] {
             assert_eq!(*byte, 0);
         }
+    });
+
+#[gpu_test]
+static READBACK_REMAP_AFTER_GPU_WRITE: GpuTestConfiguration = GpuTestConfiguration::new()
+    .run_async(|ctx| async move {
+        let source = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("readback source"),
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let readback = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("reused readback"),
+            size: 256,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        // Alternate subranges and whole-buffer maps after fresh GPU writes.
+        // A retained native mapping must expose the new data at either offset.
+        for iteration in 0..32u8 {
+            let data: Vec<u8> = (0..256)
+                .map(|i| (i as u8).wrapping_add(iteration))
+                .collect();
+            ctx.queue.write_buffer(&source, 0, &data);
+            let mut encoder = ctx.device.create_command_encoder(&Default::default());
+            encoder.copy_buffer_to_buffer(&source, 0, &readback, 0, 256);
+            ctx.queue.submit([encoder.finish()]);
+            let range = if iteration % 2 == 0 { 32..96 } else { 0..256 };
+            let slice = readback.slice(range.clone());
+            slice.map_async(wgpu::MapMode::Read, Result::unwrap);
+            ctx.async_poll(wgpu::PollType::wait_indefinitely())
+                .await
+                .unwrap();
+            {
+                let view = slice.get_mapped_range().unwrap();
+                assert_eq!(&*view, &data[range.start as usize..range.end as usize]);
+            }
+            readback.unmap();
+        }
+        readback.destroy();
+        ctx.async_poll(wgpu::PollType::wait_indefinitely())
+            .await
+            .unwrap();
     });
 
 /// Mapping a buffer should see data previously written to the buffer, even if there was no

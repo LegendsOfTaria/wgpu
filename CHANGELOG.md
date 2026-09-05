@@ -46,7 +46,7 @@ Bottom level categories:
 
 #### OpenGL ES
 
-- Avoid copying native readback buffers on the polling thread while retaining Android's client-memory upload workaround.
+- Reduce native readback overhead by avoiding polling-thread copies and retaining coherent read mappings on drivers with buffer-storage support. Android's client-memory upload workaround and GPU completion synchronization remain in place.
 
 ## v30.0.1 (2026-08-21)
 
