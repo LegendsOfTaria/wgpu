@@ -779,6 +779,7 @@ impl crate::Device for super::Device {
         buffer: &super::Buffer,
         range: crate::MemoryRange,
     ) -> Result<crate::BufferMapping, crate::DeviceError> {
+        profiling::scope!("gles::map_buffer");
         let is_coherent = buffer.map_flags & glow::MAP_COHERENT_BIT != 0;
         let ptr = match buffer.raw {
             None => {
@@ -831,6 +832,7 @@ impl crate::Device for super::Device {
         })
     }
     unsafe fn unmap_buffer(&self, buffer: &super::Buffer) {
+        profiling::scope!("gles::unmap_buffer");
         let gl = &self.shared.context.lock();
         let mut map_state = lock(&buffer.map_state);
         if core::mem::replace(&mut map_state.mapped, false) {
