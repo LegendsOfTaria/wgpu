@@ -8,6 +8,7 @@ pub fn all_tests(vec: &mut Vec<GpuTestInitializer>) {
         EMPTY_BUFFER_READ_WRITE,
         MAP_OFFSET,
         READBACK_REMAP_AFTER_GPU_WRITE,
+        UPLOAD_REMAP_AFTER_GPU_READ,
         MAP_WITHOUT_SUBMIT,
         MINIMUM_BUFFER_BINDING_SIZE_LAYOUT,
         MINIMUM_BUFFER_BINDING_SIZE_DISPATCH,
@@ -262,6 +263,65 @@ static READBACK_REMAP_AFTER_GPU_WRITE: GpuTestConfiguration = GpuTestConfigurati
             }
             readback.unmap();
         }
+        readback.destroy();
+        ctx.async_poll(wgpu::PollType::wait_indefinitely())
+            .await
+            .unwrap();
+    });
+
+#[gpu_test]
+static UPLOAD_REMAP_AFTER_GPU_READ: GpuTestConfiguration =
+    GpuTestConfiguration::new().run_async(|ctx| async move {
+        let upload = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("reused upload"),
+            size: 256,
+            usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: true,
+        });
+        let readback = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("upload verification"),
+            size: 256,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        for iteration in 0..32u8 {
+            let range = if iteration % 2 == 0 { 0..256 } else { 32..96 };
+            let data: Vec<u8> = (range.clone())
+                .map(|i| (i as u8).wrapping_add(iteration))
+                .collect();
+            {
+                let mut view = upload.slice(range.clone()).get_mapped_range_mut().unwrap();
+                view.copy_from_slice(&data);
+            }
+            upload.unmap();
+            let mut encoder = ctx.device.create_command_encoder(&Default::default());
+            encoder.copy_buffer_to_buffer(
+                &upload,
+                range.start,
+                &readback,
+                range.start,
+                range.end - range.start,
+            );
+            let next_range = if iteration % 2 == 0 { 32..96 } else { 0..256 };
+            encoder.map_buffer_on_submit(&upload, wgpu::MapMode::Write, next_range, Result::unwrap);
+            encoder.map_buffer_on_submit(
+                &readback,
+                wgpu::MapMode::Read,
+                range.clone(),
+                Result::unwrap,
+            );
+            ctx.queue.submit([encoder.finish()]);
+            ctx.async_poll(wgpu::PollType::wait_indefinitely())
+                .await
+                .unwrap();
+            {
+                let view = readback.slice(range.clone()).get_mapped_range().unwrap();
+                assert_eq!(&*view, &data);
+            }
+            readback.unmap();
+        }
+        upload.unmap();
+        upload.destroy();
         readback.destroy();
         ctx.async_poll(wgpu::PollType::wait_indefinitely())
             .await

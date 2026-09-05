@@ -233,12 +233,12 @@ impl super::Device {
             target,
             size: desc.size,
             map_flags,
-            persistent_readback: false,
+            retain_mapping: false,
             map_state: Arc::new(MaybeMutex::new(super::BufferMapState {
                 mapped: false,
                 data: None,
                 offset_of_current_mapping: 0,
-                persistent_read_mapping: None,
+                persistent_mapping: None,
             })),
             drop_guard: crate::DropGuard::from_option(drop_callback).map(Arc::new),
         }
@@ -644,12 +644,12 @@ impl crate::Device for super::Device {
                 target,
                 size: desc.size,
                 map_flags: 0,
-                persistent_readback: false,
+                retain_mapping: false,
                 map_state: Arc::new(MaybeMutex::new(super::BufferMapState {
                     mapped: false,
                     data: Some(vec![0; desc.size as usize]),
                     offset_of_current_mapping: 0,
-                    persistent_read_mapping: None,
+                    persistent_mapping: None,
                 })),
                 drop_guard: None,
             });
@@ -666,14 +666,13 @@ impl crate::Device for super::Device {
         let is_host_visible = desc
             .usage
             .intersects(wgt::BufferUses::MAP_READ | wgt::BufferUses::MAP_WRITE);
-        let persistent_readback = !emulate_map
-            && desc.usage.contains(wgt::BufferUses::MAP_READ)
-            && !desc.usage.contains(wgt::BufferUses::MAP_WRITE)
+        let retain_mapping = !emulate_map
+            && is_host_visible
             && self
                 .shared
                 .private_caps
                 .contains(PrivateCapabilities::BUFFER_ALLOCATION);
-        let is_coherent = persistent_readback
+        let is_coherent = retain_mapping
             || desc
                 .memory_flags
                 .contains(crate::MemoryFlags::PREFER_COHERENT);
@@ -758,12 +757,12 @@ impl crate::Device for super::Device {
             target,
             size: desc.size,
             map_flags,
-            persistent_readback,
+            retain_mapping,
             map_state: Arc::new(MaybeMutex::new(super::BufferMapState {
                 mapped: false,
                 data,
                 offset_of_current_mapping: 0,
-                persistent_read_mapping: None,
+                persistent_mapping: None,
             })),
             drop_guard: None,
         })
@@ -795,14 +794,14 @@ impl crate::Device for super::Device {
     ) -> Result<crate::BufferMapping, crate::DeviceError> {
         profiling::scope!("gles::map_buffer");
         let is_coherent = buffer.map_flags & glow::MAP_COHERENT_BIT != 0;
-        if buffer.persistent_readback {
+        if buffer.retain_mapping {
             if range.is_empty() {
                 return Ok(crate::BufferMapping {
                     ptr: ptr::NonNull::dangling(),
                     is_coherent,
                 });
             }
-            let cached = lock(&buffer.map_state).persistent_read_mapping;
+            let cached = lock(&buffer.map_state).persistent_mapping;
             let mapping = if let Some(mapping) = cached {
                 mapping
             } else {
@@ -812,10 +811,10 @@ impl crate::Device for super::Device {
                     gl.map_buffer_range(buffer.target, 0, buffer.size as i32, buffer.map_flags)
                 };
                 unsafe { gl.bind_buffer(buffer.target, None) };
-                let mapping = super::PersistentReadMapping(
+                let mapping = super::PersistentMapping(
                     ptr::NonNull::new(ptr).ok_or(crate::DeviceError::Lost)?,
                 );
-                lock(&buffer.map_state).persistent_read_mapping = Some(mapping);
+                lock(&buffer.map_state).persistent_mapping = Some(mapping);
                 mapping
             };
             // Coherent persistent storage remains mapped until deletion. The
@@ -879,7 +878,7 @@ impl crate::Device for super::Device {
     }
     unsafe fn unmap_buffer(&self, buffer: &super::Buffer) {
         profiling::scope!("gles::unmap_buffer");
-        if buffer.persistent_readback || !lock(&buffer.map_state).mapped {
+        if buffer.retain_mapping || !lock(&buffer.map_state).mapped {
             return;
         }
         let gl = &self.shared.context.lock();

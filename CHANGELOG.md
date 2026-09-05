@@ -46,7 +46,7 @@ Bottom level categories:
 
 #### OpenGL ES
 
-- Reduce native readback overhead by avoiding polling-thread copies and retaining coherent read mappings on drivers with buffer-storage support. Android's client-memory upload workaround and GPU completion synchronization remain in place.
+- Reduce native buffer transfer overhead by avoiding polling-thread readback copies and retaining coherent read/write mappings on drivers with buffer-storage support. Android's client-memory upload workaround and GPU completion synchronization remain in place.
 
 ## v30.0.1 (2026-08-21)
 

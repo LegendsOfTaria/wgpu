@@ -393,7 +393,7 @@ pub struct Buffer {
     size: wgt::BufferAddress,
     /// Flags to use within calls to [`Device::map_buffer`](crate::Device::map_buffer).
     map_flags: u32,
-    persistent_readback: bool,
+    retain_mapping: bool,
     /// Buffer mapping state.
     ///
     /// If locked concurrently with the GL context, the GL context should be locked first.
@@ -408,20 +408,20 @@ pub struct Buffer {
 
 #[derive(Clone, Debug)]
 struct BufferMapState {
-    /// True for a GL mapping that must be unmapped, excluding retained read
+    /// True for a GL mapping that must be unmapped, excluding retained
     /// mappings and "fake-mapped" empty slices.
     mapped: bool,
     data: Option<Vec<u8>>,
     offset_of_current_mapping: wgt::BufferAddress,
-    persistent_read_mapping: Option<PersistentReadMapping>,
+    persistent_mapping: Option<PersistentMapping>,
 }
 
 #[derive(Clone, Copy, Debug)]
-struct PersistentReadMapping(core::ptr::NonNull<u8>);
+struct PersistentMapping(core::ptr::NonNull<u8>);
 
-// The mapping is protected by map_state. HAL callers synchronize CPU reads
-// with GPU writes and keep the buffer alive while accessing the pointer.
-unsafe impl Send for PersistentReadMapping {}
+// The mapping is protected by map_state. HAL callers synchronize CPU access
+// with GPU access and keep the buffer alive while accessing the pointer.
+unsafe impl Send for PersistentMapping {}
 
 #[cfg(send_sync)]
 static_assertions::assert_impl_all!(Buffer: Send, Sync);
