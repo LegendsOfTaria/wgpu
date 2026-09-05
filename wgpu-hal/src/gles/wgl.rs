@@ -65,6 +65,7 @@ impl AdapterContext {
     /// do rendering.
     #[track_caller]
     pub fn lock(&self) -> AdapterContextLock<'_> {
+        profiling::scope!("WGL::context_lock");
         let inner = self
             .inner
             // Don't lock forever. If it takes longer than 1 second to get the lock we've got a
@@ -86,6 +87,7 @@ impl AdapterContext {
     /// when `make_current` fails.
     #[track_caller]
     fn lock_with_dc(&self, device: Gdi::HDC) -> windows::core::Result<AdapterContextLock<'_>> {
+        profiling::scope!("WGL::surface_context_lock");
         let inner = self
             .inner
             .try_lock_for(Duration::from_secs(CONTEXT_LOCK_TIMEOUT_SECS))
@@ -126,10 +128,12 @@ struct WglContext {
 
 impl WglContext {
     fn make_current(&self, device: Gdi::HDC) -> windows::core::Result<()> {
+        profiling::scope!("wglMakeCurrent");
         unsafe { OpenGL::wglMakeCurrent(device, self.context) }
     }
 
     fn unmake_current(&self) -> windows::core::Result<()> {
+        profiling::scope!("wglReleaseCurrent");
         if unsafe { OpenGL::wglGetCurrentContext() }.is_invalid() {
             return Ok(());
         }
