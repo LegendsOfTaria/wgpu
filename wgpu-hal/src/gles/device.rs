@@ -626,10 +626,15 @@ impl crate::Device for super::Device {
             .shared
             .workarounds
             .contains(super::Workarounds::EMULATE_BUFFER_MAP)
-            || !self
-                .shared
-                .private_caps
-                .contains(PrivateCapabilities::BUFFER_ALLOCATION);
+            || (desc.usage.contains(wgt::BufferUses::MAP_WRITE)
+                && (self
+                    .shared
+                    .workarounds
+                    .contains(super::Workarounds::EMULATE_BUFFER_MAP_WRITE)
+                    || !self
+                        .shared
+                        .private_caps
+                        .contains(PrivateCapabilities::BUFFER_ALLOCATION)));
 
         if emulate_map && desc.usage.intersects(wgt::BufferUses::MAP_WRITE) {
             return Ok(super::Buffer {

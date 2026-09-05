@@ -42,6 +42,12 @@ Bottom level categories:
 
 ## Unreleased
 
+### Performance
+
+#### OpenGL ES
+
+- Avoid copying native readback buffers on the polling thread while retaining Android's client-memory upload workaround.
+
 ## v30.0.1 (2026-08-21)
 
 ### Bug Fixes

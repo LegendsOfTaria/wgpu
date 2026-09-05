@@ -914,13 +914,16 @@ impl super::Adapter {
 
         let mut workarounds = super::Workarounds::empty();
 
-        let use_client_memory_staging_buffers = cfg!(any(webgl, Emscripten, target_os = "android"));
         workarounds.set(
             super::Workarounds::EMULATE_BUFFER_MAP,
-            use_client_memory_staging_buffers,
+            cfg!(any(webgl, Emscripten)),
+        );
+        workarounds.set(
+            super::Workarounds::EMULATE_BUFFER_MAP_WRITE,
+            cfg!(target_os = "android"),
         );
         if cfg!(target_os = "android") {
-            log::info!("Using client-memory staging buffers on Android GLES");
+            log::info!("Using client-memory upload buffers on Android GLES");
         }
 
         let r = renderer.to_lowercase();

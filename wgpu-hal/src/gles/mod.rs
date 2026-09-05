@@ -265,6 +265,7 @@ bitflags::bitflags! {
         const MESA_I915_SRGB_SHADER_CLEAR = 1 << 0;
         /// Buffer map must emulated because it is not supported natively
         const EMULATE_BUFFER_MAP = 1 << 1;
+        const EMULATE_BUFFER_MAP_WRITE = 1 << 2;
     }
 }
 
