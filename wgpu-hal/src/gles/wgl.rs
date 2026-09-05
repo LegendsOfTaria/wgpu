@@ -21,7 +21,7 @@ use std::{
 use glow::HasContext;
 use glutin_wgl_sys::wgl_extra::{
     Wgl, CONTEXT_CORE_PROFILE_BIT_ARB, CONTEXT_DEBUG_BIT_ARB, CONTEXT_FLAGS_ARB,
-    CONTEXT_PROFILE_MASK_ARB, CONTEXT_RELEASE_BEHAVIOR_ARB, CONTEXT_RELEASE_BEHAVIOR_NONE_ARB,
+    CONTEXT_PROFILE_MASK_ARB,
 };
 use hashbrown::HashSet;
 use parking_lot::{Mutex, MutexGuard, RwLock};
@@ -492,7 +492,7 @@ impl crate::Instance for Instance {
             && extra.CreateContextAttribsARB.is_loaded();
 
         let context = if can_use_profile {
-            let mut attributes = vec![
+            let attributes = [
                 CONTEXT_PROFILE_MASK_ARB as c_int,
                 CONTEXT_CORE_PROFILE_BIT_ARB as c_int,
                 CONTEXT_FLAGS_ARB as c_int,
@@ -501,17 +501,8 @@ impl crate::Instance for Instance {
                 } else {
                     0
                 },
+                0, // End of list
             ];
-            if extensions.contains("WGL_ARB_context_flush_control") {
-                // Queue::submit explicitly flushes its fence. Releasing a context
-                // after each buffer operation must not also flush the driver.
-                attributes.extend([
-                    CONTEXT_RELEASE_BEHAVIOR_ARB as c_int,
-                    CONTEXT_RELEASE_BEHAVIOR_NONE_ARB as c_int,
-                ]);
-                log::debug!("Disabling implicit WGL context-release flushes");
-            }
-            attributes.push(0);
             let context =
                 unsafe { extra.CreateContextAttribsARB(dc.0, ptr::null(), attributes.as_ptr()) };
             if context.is_null() {
