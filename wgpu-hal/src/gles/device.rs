@@ -233,10 +233,12 @@ impl super::Device {
             target,
             size: desc.size,
             map_flags,
+            retain_mapping: false,
             map_state: Arc::new(MaybeMutex::new(super::BufferMapState {
                 mapped: false,
                 data: None,
                 offset_of_current_mapping: 0,
+                persistent_mapping: None,
             })),
             drop_guard: crate::DropGuard::from_option(drop_callback).map(Arc::new),
         }
@@ -626,10 +628,15 @@ impl crate::Device for super::Device {
             .shared
             .workarounds
             .contains(super::Workarounds::EMULATE_BUFFER_MAP)
-            || !self
-                .shared
-                .private_caps
-                .contains(PrivateCapabilities::BUFFER_ALLOCATION);
+            || (desc.usage.contains(wgt::BufferUses::MAP_WRITE)
+                && (self
+                    .shared
+                    .workarounds
+                    .contains(super::Workarounds::EMULATE_BUFFER_MAP_WRITE)
+                    || !self
+                        .shared
+                        .private_caps
+                        .contains(PrivateCapabilities::BUFFER_ALLOCATION)));
 
         if emulate_map && desc.usage.intersects(wgt::BufferUses::MAP_WRITE) {
             return Ok(super::Buffer {
@@ -637,10 +644,12 @@ impl crate::Device for super::Device {
                 target,
                 size: desc.size,
                 map_flags: 0,
+                retain_mapping: false,
                 map_state: Arc::new(MaybeMutex::new(super::BufferMapState {
                     mapped: false,
                     data: Some(vec![0; desc.size as usize]),
                     offset_of_current_mapping: 0,
+                    persistent_mapping: None,
                 })),
                 drop_guard: None,
             });
@@ -657,9 +666,16 @@ impl crate::Device for super::Device {
         let is_host_visible = desc
             .usage
             .intersects(wgt::BufferUses::MAP_READ | wgt::BufferUses::MAP_WRITE);
-        let is_coherent = desc
-            .memory_flags
-            .contains(crate::MemoryFlags::PREFER_COHERENT);
+        let retain_mapping = !emulate_map
+            && is_host_visible
+            && self
+                .shared
+                .private_caps
+                .contains(PrivateCapabilities::BUFFER_ALLOCATION);
+        let is_coherent = retain_mapping
+            || desc
+                .memory_flags
+                .contains(crate::MemoryFlags::PREFER_COHERENT);
 
         let mut map_flags = 0;
         if desc.usage.contains(wgt::BufferUses::MAP_READ) {
@@ -741,10 +757,12 @@ impl crate::Device for super::Device {
             target,
             size: desc.size,
             map_flags,
+            retain_mapping,
             map_state: Arc::new(MaybeMutex::new(super::BufferMapState {
                 mapped: false,
                 data,
                 offset_of_current_mapping: 0,
+                persistent_mapping: None,
             })),
             drop_guard: None,
         })
@@ -774,7 +792,40 @@ impl crate::Device for super::Device {
         buffer: &super::Buffer,
         range: crate::MemoryRange,
     ) -> Result<crate::BufferMapping, crate::DeviceError> {
+        profiling::scope!("gles::map_buffer");
         let is_coherent = buffer.map_flags & glow::MAP_COHERENT_BIT != 0;
+        if buffer.retain_mapping {
+            if range.is_empty() {
+                return Ok(crate::BufferMapping {
+                    ptr: ptr::NonNull::dangling(),
+                    is_coherent,
+                });
+            }
+            let cached = lock(&buffer.map_state).persistent_mapping;
+            let mapping = if let Some(mapping) = cached {
+                mapping
+            } else {
+                let gl = &self.shared.context.lock();
+                unsafe { gl.bind_buffer(buffer.target, buffer.raw) };
+                let ptr = unsafe {
+                    gl.map_buffer_range(buffer.target, 0, buffer.size as i32, buffer.map_flags)
+                };
+                unsafe { gl.bind_buffer(buffer.target, None) };
+                let mapping = super::PersistentMapping(
+                    ptr::NonNull::new(ptr).ok_or(crate::DeviceError::Lost)?,
+                );
+                lock(&buffer.map_state).persistent_mapping = Some(mapping);
+                mapping
+            };
+            // Coherent persistent storage remains mapped until deletion. The
+            // caller still waits for the submission fence before each map.
+            return Ok(crate::BufferMapping {
+                ptr: unsafe {
+                    ptr::NonNull::new_unchecked(mapping.0.as_ptr().add(range.start as usize))
+                },
+                is_coherent,
+            });
+        }
         let ptr = match buffer.raw {
             None => {
                 let mut map_state = lock(&buffer.map_state);
@@ -826,6 +877,10 @@ impl crate::Device for super::Device {
         })
     }
     unsafe fn unmap_buffer(&self, buffer: &super::Buffer) {
+        profiling::scope!("gles::unmap_buffer");
+        if buffer.retain_mapping || !lock(&buffer.map_state).mapped {
+            return;
+        }
         let gl = &self.shared.context.lock();
         let mut map_state = lock(&buffer.map_state);
         if core::mem::replace(&mut map_state.mapped, false) {
@@ -1736,6 +1791,7 @@ impl crate::Device for super::Device {
         &self,
         fence: &super::Fence,
     ) -> Result<crate::FenceValue, crate::DeviceError> {
+        profiling::scope!("GLES::get_fence_value");
         #[cfg_attr(target_arch = "wasm32", allow(clippy::needless_borrow))]
         Ok(fence.get_latest(&self.shared.context.lock()))
     }

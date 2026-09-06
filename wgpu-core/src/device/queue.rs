@@ -126,6 +126,7 @@ impl Queue {
         &self,
         texture: &Arc<Texture>,
     ) -> Result<(), DeviceError> {
+        profiling::scope!("Queue::prepare_surface_texture_for_present");
         let snatch_guard = self.device.snatchable_lock.read();
         let submission = self
             .allocate_submission(snatch_guard)
@@ -182,6 +183,9 @@ impl Queue {
                     texture.full_range.clone(),
                     wgt::TextureUses::PRESENT,
                 )
+                // PRESENT is excluded from the ordered-use mask, so the tracker
+                // also emits PRESENT -> PRESENT. That introduces no new GPU access.
+                .filter(|transition| transition.usage.from != wgt::TextureUses::PRESENT)
                 .collect();
             pending
         };
@@ -2120,4 +2124,80 @@ fn validate_command_buffer(
         }
     }
     Ok(())
+}
+
+#[cfg(all(test, feature = "noop"))]
+mod present_tests {
+    use super::*;
+
+    #[test]
+    fn already_present_texture_does_not_submit_but_uninitialized_texture_does() {
+        let global = Global::new(
+            "presentation preparation regression",
+            wgt::InstanceDescriptor {
+                backends: wgt::Backends::NOOP,
+                flags: wgt::InstanceFlags::empty(),
+                backend_options: wgt::BackendOptions {
+                    noop: wgt::NoopBackendOptions::enabled(),
+                    ..Default::default()
+                },
+                ..wgt::InstanceDescriptor::new_without_display_handle()
+            },
+            None,
+        );
+        let adapter = global
+            .request_adapter(&Default::default(), wgt::Backends::NOOP, None)
+            .unwrap();
+        let (device_id, queue_id) = global
+            .adapter_request_device(adapter, &Default::default(), None, None)
+            .unwrap();
+        let device = global.hub.devices.get(device_id);
+        let queue = global.hub.queues.get(queue_id);
+        let (texture_id, error) = global.device_create_texture(
+            device_id,
+            &crate::resource::TextureDescriptor {
+                label: None,
+                size: wgt::Extent3d {
+                    width: 4,
+                    height: 4,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgt::TextureDimension::D2,
+                format: wgt::TextureFormat::Rgba8Unorm,
+                usage: wgt::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: Vec::new(),
+            },
+            None,
+        );
+        assert!(error.is_none(), "{error:?}");
+        let texture = global.hub.textures.get(texture_id);
+
+        // Exercise the actual clear, tracker, submission and fence path without a window.
+        assert!(texture.initialization_status.read().mips[0]
+            .check(0..1)
+            .is_some());
+        queue.prepare_surface_texture_for_present(&texture).unwrap();
+        assert!(texture.initialization_status.read().mips[0]
+            .check(0..1)
+            .is_none());
+        let submitted = device
+            .last_successful_submission_index
+            .load(Ordering::Acquire);
+        assert!(
+            submitted > 0,
+            "an unused texture must still be cleared before presentation"
+        );
+        for _ in 0..3 {
+            queue.prepare_surface_texture_for_present(&texture).unwrap();
+            assert_eq!(
+                device
+                    .last_successful_submission_index
+                    .load(Ordering::Acquire),
+                submitted,
+                "an already-present texture must not submit another fence"
+            );
+        }
+    }
 }

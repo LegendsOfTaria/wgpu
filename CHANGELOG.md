@@ -42,6 +42,16 @@ Bottom level categories:
 
 ## Unreleased
 
+### Performance
+
+#### General
+
+- Avoid an extra GPU submission when a rendered surface texture is already ready for presentation. Unused surface textures are still cleared before presentation.
+
+#### OpenGL ES
+
+- Reduce native buffer transfer overhead by avoiding polling-thread readback copies and retaining coherent read/write mappings on drivers with buffer-storage support. Android's client-memory upload workaround and GPU completion synchronization remain in place.
+
 ## v30.0.1 (2026-08-21)
 
 ### Bug Fixes

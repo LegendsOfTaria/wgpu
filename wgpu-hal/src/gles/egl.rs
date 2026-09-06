@@ -179,12 +179,14 @@ struct EglContext {
 
 impl EglContext {
     fn make_current(&self) {
+        profiling::scope!("eglMakeCurrent");
         self.instance
             .make_current(self.display, self.pbuffer, self.pbuffer, Some(self.raw))
             .unwrap();
     }
 
     fn unmake_current(&self) {
+        profiling::scope!("eglReleaseCurrent");
         self.instance
             .make_current(self.display, None, None, None)
             .unwrap();
@@ -283,6 +285,7 @@ impl<'a> core::ops::Deref for AdapterContextLock<'a> {
 
 impl<'a> Drop for AdapterContextLock<'a> {
     fn drop(&mut self) {
+        profiling::scope!("eglReleaseCurrent");
         if let Some(egl) = self.egl.take() {
             if let Err(err) = egl.instance.make_current(egl.display, None, None, None) {
                 log::error!("Failed to make EGL context current: {err:?}");
@@ -315,6 +318,7 @@ impl AdapterContext {
     /// do rendering.
     #[track_caller]
     pub fn lock<'a>(&'a self) -> AdapterContextLock<'a> {
+        profiling::scope!("AdapterContext::lock");
         let glow = self
             .glow
             // Don't lock forever. If it takes longer than 1 second to get the lock we've got a
