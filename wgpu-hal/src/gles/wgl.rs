@@ -729,6 +729,7 @@ impl Surface {
         // but main rendering is. Therefore, we Y-flip the output positions
         // in the shader, and also this blit.
         unsafe {
+            profiling::scope!("WGL::present_blit");
             gl.blit_framebuffer(
                 0,
                 sc.extent.height as i32,
@@ -750,7 +751,11 @@ impl Surface {
         unsafe { gl.bind_renderbuffer(glow::RENDERBUFFER, None) };
         unsafe { gl.bind_framebuffer(glow::READ_FRAMEBUFFER, None) };
 
-        if let Err(e) = unsafe { OpenGL::SwapBuffers(dc.device) } {
+        let swap_result = {
+            profiling::scope!("WGL::SwapBuffers");
+            unsafe { OpenGL::SwapBuffers(dc.device) }
+        };
+        if let Err(e) = swap_result {
             log::error!("unable to swap buffers: {e}");
             return Err(crate::SurfaceError::Other("unable to swap buffers"));
         }

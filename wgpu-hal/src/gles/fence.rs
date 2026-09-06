@@ -48,6 +48,7 @@ impl Fence {
         gl: &glow::Context,
         value: crate::FenceValue,
     ) -> Result<(), crate::DeviceError> {
+        profiling::scope!("GLES::fence_signal");
         if self.fence_behavior.is_auto_finish() {
             self.last_completed.store(value, Ordering::Release);
             return Ok(());
@@ -68,6 +69,7 @@ impl Fence {
     }
 
     pub fn get_latest(&self, gl: &glow::Context) -> crate::FenceValue {
+        profiling::scope!("GLES::fence_status");
         let mut max_value = self.last_completed.load(Ordering::Acquire);
 
         if self.fence_behavior.is_auto_finish() {
@@ -98,6 +100,7 @@ impl Fence {
     }
 
     pub fn maintain(&self, gl: &glow::Context) {
+        profiling::scope!("GLES::fence_maintain");
         if self.fence_behavior.is_auto_finish() {
             return;
         }

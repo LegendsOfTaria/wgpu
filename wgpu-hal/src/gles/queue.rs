@@ -1909,6 +1909,7 @@ impl crate::Queue for super::Queue {
         let shared = Arc::clone(&self.shared);
         let gl = &shared.context.lock();
         for cmd_buf in command_buffers.iter() {
+            profiling::scope!("GLES::replay_commands");
             // The command encoder assumes a default state when encoding the command buffer.
             // Always reset the state between command_buffers to reflect this assumption. Do
             // this at the beginning of the loop in case something outside of wgpu modified
@@ -1950,7 +1951,10 @@ impl crate::Queue for super::Queue {
         // This is extremely important. If we don't flush, the above fences may never
         // be signaled, particularly in headless contexts. Headed contexts will
         // often flush every so often, but headless contexts may not.
-        unsafe { gl.flush() };
+        {
+            profiling::scope!("GLES::flush");
+            unsafe { gl.flush() };
+        }
 
         Ok(())
     }
