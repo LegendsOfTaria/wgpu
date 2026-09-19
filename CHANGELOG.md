@@ -42,6 +42,14 @@ Bottom level categories:
 
 ## Unreleased
 
+### Bug Fixes
+
+#### GLES / OpenGL
+
+- Allow OpenGL presentation on explicit Wayland and X11 displays when EGL window configurations do not support native rendering APIs, including NVIDIA drivers.
+- Add `GlBackendOptions::egl_native_visual_id` to match the EGL configuration to an existing X11 window, including opaque windows without an alpha channel.
+- Respect the shader generator's GLSL requirements when exposing OpenGL compute and storage extensions, preventing device creation failures on OpenGL 3.3 contexts.
+
 ### Performance
 
 #### General
