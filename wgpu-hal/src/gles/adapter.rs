@@ -308,10 +308,13 @@ impl super::Adapter {
             es_supported || full_supported
         };
 
-        let supports_storage =
-            supported((3, 1), (4, 3)) || extensions.contains("GL_ARB_shader_storage_buffer_object");
-        let supports_compute =
-            supported((3, 1), (4, 3)) || extensions.contains("GL_ARB_compute_shader");
+        // Extension support must also meet Naga's minimum GLSL versions.
+        let supports_storage = supported((3, 1), (4, 3))
+            || (extensions.contains("GL_ARB_shader_storage_buffer_object")
+                && shading_language_version >= naga::back::glsl::Version::Desktop(400));
+        let supports_compute = supported((3, 1), (4, 3))
+            || (extensions.contains("GL_ARB_compute_shader")
+                && shading_language_version >= naga::back::glsl::Version::Desktop(420));
         let supports_work_group_params = supports_compute;
 
         // ANGLE provides renderer strings like: "ANGLE (Apple, Apple M1 Pro, OpenGL 4.1)"

@@ -248,6 +248,11 @@ impl BackendOptions {
 /// Part of [`BackendOptions`].
 #[derive(Clone, Debug, Default)]
 pub struct GlBackendOptions {
+    /// Native X11 visual of the presentation window, used to select a compatible EGL configuration.
+    ///
+    /// Supply this together with an X11 display in [`crate::InstanceDescriptor::display`].
+    /// Ignored on other window systems. `None` lets EGL choose the configuration.
+    pub egl_native_visual_id: Option<u32>,
     /// Which OpenGL ES 3 minor version to request, if using OpenGL ES.
     pub gles_minor_version: Gles3MinorVersion,
     /// Behavior of OpenGL fences. Affects how `on_completed_work_done` and `device.poll` behave.
@@ -277,6 +282,7 @@ impl GlBackendOptions {
         let gles_minor_version = Gles3MinorVersion::from_env().unwrap_or_default();
         let debug_fns = GlDebugFns::from_env().unwrap_or_default();
         Self {
+            egl_native_visual_id: None,
             gles_minor_version,
             fence_behavior: GlFenceBehavior::Normal,
             debug_fns,
@@ -292,6 +298,7 @@ impl GlBackendOptions {
         let fence_behavior = self.fence_behavior.with_env();
         let debug_fns = self.debug_fns.with_env();
         Self {
+            egl_native_visual_id: self.egl_native_visual_id,
             gles_minor_version,
             fence_behavior,
             debug_fns,

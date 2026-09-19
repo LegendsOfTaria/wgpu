@@ -95,6 +95,8 @@ fn choose_config(
     egl: &EglInstance,
     display: khronos_egl::Display,
     srgb_kind: SrgbFrameBufferKind,
+    window_kind: WindowKind,
+    native_visual_id: Option<u32>,
 ) -> Result<(khronos_egl::Config, bool), crate::InstanceError> {
     //TODO: EGL_SLOW_CONFIG
     let tiers = [
@@ -127,9 +129,10 @@ fn choose_config(
         for &(_, tier_attr) in tiers[..=tier_max].iter() {
             attributes.extend_from_slice(tier_attr);
         }
-        // make sure the Alpha is enough to support sRGB
+        // An X11 window's visual determines alpha; opaque visuals also support sRGB.
         match srgb_kind {
             SrgbFrameBufferKind::None => {}
+            _ if native_visual_id.is_some() => {}
             _ => {
                 attributes.push(khronos_egl::ALPHA_SIZE);
                 attributes.push(8);
@@ -137,7 +140,23 @@ fn choose_config(
         }
         attributes.push(khronos_egl::NONE);
 
-        match egl.choose_first_config(display, &attributes) {
+        let chosen_config = if let Some(visual_id) = native_visual_id {
+            let count = egl
+                .get_config_count(display)
+                .map_err(instance_err("failed to get EGL config count"))?;
+            let mut configs = Vec::with_capacity(count);
+            egl.choose_config(display, &attributes, &mut configs)
+                .map(|()| {
+                    configs.into_iter().find(|&config| {
+                        egl.get_config_attrib(display, config, khronos_egl::NATIVE_VISUAL_ID)
+                            .is_ok_and(|id| id as u32 == visual_id)
+                    })
+                })
+        } else {
+            egl.choose_first_config(display, &attributes)
+        };
+
+        match chosen_config {
             Ok(Some(config)) => {
                 if tier_max == 1 {
                     //Note: this has been confirmed to malfunction on Intel+NV laptops,
@@ -145,12 +164,19 @@ fn choose_config(
                     log::info!("EGL says it can present to the window but not natively",);
                 }
                 // Android emulator can't natively present either.
-                let tier_threshold =
-                    if cfg!(target_os = "android") || cfg!(windows) || cfg!(target_env = "ohos") {
-                        1
-                    } else {
-                        2
-                    };
+                // An explicit window-system display only needs WINDOW_BIT;
+                // NATIVE_RENDERABLE describes compatibility with native drawing APIs.
+                let tier_threshold = if matches!(
+                    window_kind,
+                    WindowKind::Wayland | WindowKind::X11 | WindowKind::AngleX11
+                ) || cfg!(target_os = "android")
+                    || cfg!(windows)
+                    || cfg!(target_env = "ohos")
+                {
+                    1
+                } else {
+                    2
+                };
                 return Ok((config, tier_max >= tier_threshold));
             }
             Ok(None) => {
@@ -406,7 +432,8 @@ impl Inner {
         flags: wgt::InstanceFlags,
         egl: Arc<EglInstance>,
         display: khronos_egl::Display,
-        force_gles_minor_version: wgt::Gles3MinorVersion,
+        options: &wgt::GlBackendOptions,
+        window_kind: WindowKind,
     ) -> Result<Self, crate::InstanceError> {
         let version = initialize_display(&egl, display)
             .map_err(instance_err("failed to initialize EGL display connection"))?;
@@ -453,7 +480,13 @@ impl Inner {
             }
         }
 
-        let (config, supports_native_window) = choose_config(&egl, display, srgb_kind)?;
+        let native_visual_id = match window_kind {
+            WindowKind::X11 | WindowKind::AngleX11 => options.egl_native_visual_id,
+            _ => None,
+        };
+        let (config, supports_native_window) =
+            choose_config(&egl, display, srgb_kind, window_kind, native_visual_id)?;
+        let force_gles_minor_version = options.gles_minor_version;
 
         let supports_opengl = if version >= (1, 4) {
             let client_apis = egl
@@ -907,12 +940,7 @@ impl crate::Instance for Instance {
             unsafe { (function)(Some(egl_debug_proc), attributes.as_ptr()) };
         }
 
-        let inner = Inner::create(
-            desc.flags,
-            egl,
-            display,
-            desc.backend_options.gl.gles_minor_version,
-        )?;
+        let inner = Inner::create(desc.flags, egl, display, &desc.backend_options.gl, wsi_kind)?;
 
         Ok(Instance {
             wsi: WindowSystemInterface { kind: wsi_kind },
