@@ -1343,8 +1343,20 @@ impl crate::Surface for Surface {
 
                 let mut attributes = vec![
                     khronos_egl::RENDER_BUFFER,
-                    // Presentation blits into the window back buffer before swapping.
-                    khronos_egl::BACK_BUFFER,
+                    // We don't want any of the buffering done by the driver, because we
+                    // manage a swapchain on our side.
+                    // Some drivers just fail on surface creation seeing `EGL_SINGLE_BUFFER`.
+                    if cfg!(any(
+                        target_os = "android",
+                        target_os = "macos",
+                        target_env = "ohos"
+                    )) || cfg!(windows)
+                        || self.wsi.kind == WindowKind::AngleX11
+                    {
+                        khronos_egl::BACK_BUFFER
+                    } else {
+                        khronos_egl::SINGLE_BUFFER
+                    },
                 ];
                 if config.format.is_srgb() {
                     match self.srgb_kind {
