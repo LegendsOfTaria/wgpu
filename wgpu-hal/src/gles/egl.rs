@@ -1171,12 +1171,11 @@ impl Surface {
         unsafe { gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, None) };
         // Select the window buffer after binding it; a surfaceless context can
         // leave its default draw buffer as NONE. GLES exposes only BACK here.
-        let draw_buffer =
-            if gl.version().is_embedded || unsafe { gl.get_parameter_bool(glow::DOUBLEBUFFER) } {
-                glow::BACK
-            } else {
-                glow::FRONT
-            };
+        let draw_buffer = if gl.version().is_embedded {
+            glow::BACK
+        } else {
+            glow::BACK_LEFT
+        };
         unsafe { gl.draw_buffers(&[draw_buffer]) };
         unsafe { gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(sc.framebuffer)) };
 
@@ -1344,20 +1343,8 @@ impl crate::Surface for Surface {
 
                 let mut attributes = vec![
                     khronos_egl::RENDER_BUFFER,
-                    // We don't want any of the buffering done by the driver, because we
-                    // manage a swapchain on our side.
-                    // Some drivers just fail on surface creation seeing `EGL_SINGLE_BUFFER`.
-                    if cfg!(any(
-                        target_os = "android",
-                        target_os = "macos",
-                        target_env = "ohos"
-                    )) || cfg!(windows)
-                        || self.wsi.kind == WindowKind::AngleX11
-                    {
-                        khronos_egl::BACK_BUFFER
-                    } else {
-                        khronos_egl::SINGLE_BUFFER
-                    },
+                    // Presentation blits into the window back buffer before swapping.
+                    khronos_egl::BACK_BUFFER,
                 ];
                 if config.format.is_srgb() {
                     match self.srgb_kind {
