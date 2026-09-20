@@ -1167,9 +1167,17 @@ impl Surface {
 
         unsafe { gl.disable(glow::SCISSOR_TEST) };
         unsafe { gl.color_mask(true, true, true, true) };
-        unsafe { gl.draw_buffer(glow::BACK) };
 
         unsafe { gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, None) };
+        // Select the window buffer after binding it; a surfaceless context can
+        // leave its default draw buffer as NONE. GLES exposes only BACK here.
+        let draw_buffer =
+            if gl.version().is_embedded || unsafe { gl.get_parameter_bool(glow::DOUBLEBUFFER) } {
+                glow::BACK
+            } else {
+                glow::FRONT
+            };
+        unsafe { gl.draw_buffers(&[draw_buffer]) };
         unsafe { gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(sc.framebuffer)) };
 
         if !matches!(self.srgb_kind, SrgbFrameBufferKind::None) {
