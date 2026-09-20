@@ -1167,6 +1167,7 @@ impl Surface {
 
         unsafe { gl.disable(glow::SCISSOR_TEST) };
         unsafe { gl.color_mask(true, true, true, true) };
+        unsafe { gl.draw_buffer(glow::BACK) };
 
         unsafe { gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, None) };
         unsafe { gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(sc.framebuffer)) };
