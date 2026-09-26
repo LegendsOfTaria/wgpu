@@ -46,6 +46,7 @@ Bottom level categories:
 
 #### GLES / OpenGL
 
+- Fix rejected buffer uploads and black rendering on Android drivers with immutable buffer storage support.
 - Fix black EGL windows by explicitly selecting the window draw buffer before presentation, using the appropriate desktop OpenGL or GLES enum.
 - Allow OpenGL presentation on explicit Wayland and X11 displays when EGL window configurations do not support native rendering APIs, including NVIDIA drivers.
 - Add `GlBackendOptions::egl_native_visual_id` to match the EGL configuration to an existing X11 window, including opaque windows without an alpha channel.

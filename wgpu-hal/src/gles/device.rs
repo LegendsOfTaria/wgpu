@@ -703,11 +703,15 @@ impl crate::Device for super::Device {
                     map_flags |= glow::MAP_COHERENT_BIT;
                 }
             }
-            // TODO: may also be required for other calls involving `buffer_sub_data_u8_slice` (e.g. copy buffer to buffer and clear buffer)
-            if desc.usage.intersects(wgt::BufferUses::QUERY_RESOLVE) {
-                map_flags |= glow::DYNAMIC_STORAGE_BIT;
+            let mut storage_flags = map_flags;
+            // Emulated staging buffers upload to COPY_DST buffers with glBufferSubData.
+            if desc
+                .usage
+                .intersects(wgt::BufferUses::COPY_DST | wgt::BufferUses::QUERY_RESOLVE)
+            {
+                storage_flags |= glow::DYNAMIC_STORAGE_BIT;
             }
-            unsafe { gl.buffer_storage(target, raw_size, None, map_flags) };
+            unsafe { gl.buffer_storage(target, raw_size, None, storage_flags) };
         } else {
             assert!(!is_coherent);
             let usage = if is_host_visible {
