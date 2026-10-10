@@ -249,6 +249,8 @@ bitflags::bitflags! {
         /// `GL_ARB_shader_image_load_store`; GLES needs `GL_NV_image_formats`
         /// (which itself depends on `GL_EXT_texture_norm16`).
         const TEXTURE_FORMAT_NORM16_STORAGE = 1 << 20;
+        /// Supports `glCopyImageSubData`: GLES 3.2, GL 4.3 or `GL_ARB_copy_image`.
+        const COPY_IMAGE = 1 << 21;
     }
 }
 

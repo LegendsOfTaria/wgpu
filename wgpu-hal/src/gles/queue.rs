@@ -50,6 +50,15 @@ fn get_z_offset(target: u32, base: &crate::TextureCopyBase) -> u32 {
     }
 }
 
+/// The `z` argument of `glCopyImageSubData`, which also selects a cube map's face.
+fn get_copy_image_z(target: u32, base: &crate::TextureCopyBase) -> u32 {
+    match target {
+        glow::TEXTURE_2D => 0,
+        glow::TEXTURE_CUBE_MAP => base.array_layer,
+        _ => get_z_offset(target, base),
+    }
+}
+
 impl super::Queue {
     /// Performs a manual shader clear, used as a workaround for a clearing bug on mesa
     unsafe fn perform_shader_clear(&self, gl: &glow::Context, draw_buffer: u32, color: [f32; 4]) {
@@ -688,6 +697,40 @@ impl super::Queue {
                         gl.pixel_store_bool(UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
                     }
                 }
+            }
+            C::CopyTextureToTexture {
+                src,
+                src_target,
+                dst,
+                dst_target,
+                ref copy,
+            } if self
+                .shared
+                .private_caps
+                .contains(PrivateCapabilities::COPY_IMAGE) =>
+            {
+                // A direct texture copy. The framebuffer path below reads through
+                // `glCopyTexSubImage*`, which NVIDIA's driver runs as a synchronous CPU
+                // round trip of about 100 ms per megapixel.
+                unsafe {
+                    gl.copy_image_sub_data(
+                        src,
+                        src_target,
+                        copy.src_base.mip_level as i32,
+                        copy.src_base.origin.x as i32,
+                        copy.src_base.origin.y as i32,
+                        get_copy_image_z(src_target, &copy.src_base) as i32,
+                        dst,
+                        dst_target,
+                        copy.dst_base.mip_level as i32,
+                        copy.dst_base.origin.x as i32,
+                        copy.dst_base.origin.y as i32,
+                        get_copy_image_z(dst_target, &copy.dst_base) as i32,
+                        copy.size.width as i32,
+                        copy.size.height as i32,
+                        copy.size.depth as i32,
+                    )
+                };
             }
             C::CopyTextureToTexture {
                 src,

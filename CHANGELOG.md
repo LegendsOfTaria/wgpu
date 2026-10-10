@@ -61,6 +61,7 @@ Bottom level categories:
 #### OpenGL ES
 
 - Reduce native buffer transfer overhead by avoiding polling-thread readback copies and retaining coherent read/write mappings on drivers with buffer-storage support. Android's client-memory upload workaround and GPU completion synchronization remain in place.
+- Copy textures with `glCopyImageSubData` on GL 4.3, GLES 3.2 or `GL_ARB_copy_image` instead of reading through a framebuffer with `glCopyTexSubImage*`, which NVIDIA's driver runs as a synchronous CPU round trip of about 100 ms per megapixel. Copies also cover every requested array layer and 3D slice now.
 
 ## v30.0.1 (2026-08-21)
 
