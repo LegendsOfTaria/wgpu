@@ -104,6 +104,42 @@ pub enum PresentMode {
     Mailbox = 5,
 }
 
+/// How the presentation engine turns a surface's images to fit the display, clockwise.
+///
+/// A display can sit turned from its panel's native orientation, as a phone held in landscape does.
+/// Images drawn for the display then need turning to the panel, which on Android the compositor
+/// does on the GPU every frame unless the display hardware can, at a cost in frame time and
+/// battery. An application can instead draw into images already turned to the panel
+/// ("pre-rotation"): configure [`SurfaceConfiguration::pre_transform`] to
+/// [`SurfaceCapabilities::current_transform`], the extent in the panel's own orientation (width and
+/// height swapped for [`Self::Rotate90`] and [`Self::Rotate270`]), and turn what it draws to match.
+///
+/// Only Vulkan reports or applies a transform; every other backend uses [`Self::Identity`].
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
+pub enum SurfaceTransform {
+    /// Images are shown as drawn.
+    #[default]
+    Identity = 0,
+    /// Images are turned 90 degrees clockwise.
+    Rotate90 = 1,
+    /// Images are turned 180 degrees.
+    Rotate180 = 2,
+    /// Images are turned 270 degrees clockwise.
+    Rotate270 = 3,
+}
+
+impl SurfaceTransform {
+    /// Whether images in this transform are the panel's way round, so their width and height are
+    /// the display's swapped.
+    #[must_use]
+    pub fn swaps_extent(self) -> bool {
+        matches!(self, Self::Rotate90 | Self::Rotate270)
+    }
+}
+
 /// Specifies how the alpha channel of the textures should be handled during
 /// compositing.
 #[repr(C)]
@@ -531,6 +567,10 @@ pub struct SurfaceCapabilities {
     ///
     /// The usage [`TextureUsages::RENDER_ATTACHMENT`] is guaranteed.
     pub usages: TextureUsages,
+    /// How the display is turned from its panel right now; configuring
+    /// [`SurfaceConfiguration::pre_transform`] to it lets the compositor show images as drawn.
+    /// Always [`SurfaceTransform::Identity`] outside Vulkan.
+    pub current_transform: SurfaceTransform,
 }
 
 impl SurfaceCapabilities {
@@ -557,6 +597,7 @@ impl Default for SurfaceCapabilities {
             present_modes: Vec::new(),
             alpha_modes: vec![CompositeAlphaMode::Opaque],
             usages: TextureUsages::RENDER_ATTACHMENT,
+            current_transform: SurfaceTransform::Identity,
         }
     }
 }
@@ -974,6 +1015,10 @@ pub struct SurfaceConfiguration<V> {
     ///
     /// Note: currently, only the srgb-ness is allowed to change. (ex: `Rgba8Unorm` texture + `Rgba8UnormSrgb` view)
     pub view_formats: V,
+    /// How the images are already turned to the display's panel ("pre-rotation", see
+    /// [`SurfaceTransform`]); [`SurfaceTransform::Identity`] leaves any turning to the compositor.
+    /// A transform the surface can't take falls back to [`SurfaceTransform::Identity`].
+    pub pre_transform: SurfaceTransform,
 }
 
 impl<V: Clone> SurfaceConfiguration<V> {
@@ -992,6 +1037,7 @@ impl<V: Clone> SurfaceConfiguration<V> {
             desired_maximum_frame_latency: self.desired_maximum_frame_latency,
             alpha_mode: self.alpha_mode,
             view_formats: fun(&self.view_formats),
+            pre_transform: self.pre_transform,
         }
     }
 }

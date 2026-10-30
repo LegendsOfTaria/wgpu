@@ -199,6 +199,7 @@ mod surface_configuration_tests {
             usage: wgt::TextureUses::COLOR_TARGET,
             present_modes: vec![wgt::PresentMode::Fifo],
             composite_alpha_modes: vec![wgt::CompositeAlphaMode::Opaque],
+            current_transform: wgt::SurfaceTransform::Identity,
         }
     }
 
@@ -219,6 +220,7 @@ mod surface_configuration_tests {
             },
             usage: wgt::TextureUses::COLOR_TARGET,
             view_formats: Vec::new(),
+            pre_transform: wgt::SurfaceTransform::Identity,
         }
     }
 
