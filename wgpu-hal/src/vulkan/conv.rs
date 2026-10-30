@@ -557,6 +557,25 @@ pub fn map_vk_composite_alpha(flags: vk::CompositeAlphaFlagsKHR) -> Vec<wgt::Com
     modes
 }
 
+/// The display's turn; mirrored transforms have no [`wgt::SurfaceTransform`] and count as identity.
+pub fn map_vk_surface_transform(transform: vk::SurfaceTransformFlagsKHR) -> wgt::SurfaceTransform {
+    match transform {
+        vk::SurfaceTransformFlagsKHR::ROTATE_90 => wgt::SurfaceTransform::Rotate90,
+        vk::SurfaceTransformFlagsKHR::ROTATE_180 => wgt::SurfaceTransform::Rotate180,
+        vk::SurfaceTransformFlagsKHR::ROTATE_270 => wgt::SurfaceTransform::Rotate270,
+        _ => wgt::SurfaceTransform::Identity,
+    }
+}
+
+pub fn map_surface_transform(transform: wgt::SurfaceTransform) -> vk::SurfaceTransformFlagsKHR {
+    match transform {
+        wgt::SurfaceTransform::Identity => vk::SurfaceTransformFlagsKHR::IDENTITY,
+        wgt::SurfaceTransform::Rotate90 => vk::SurfaceTransformFlagsKHR::ROTATE_90,
+        wgt::SurfaceTransform::Rotate180 => vk::SurfaceTransformFlagsKHR::ROTATE_180,
+        wgt::SurfaceTransform::Rotate270 => vk::SurfaceTransformFlagsKHR::ROTATE_270,
+    }
+}
+
 pub fn map_buffer_usage(usage: wgt::BufferUses) -> vk::BufferUsageFlags {
     let mut flags = vk::BufferUsageFlags::empty();
     if usage.contains(wgt::BufferUses::COPY_SRC) {

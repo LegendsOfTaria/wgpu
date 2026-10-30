@@ -176,6 +176,7 @@ impl Surface for NativeSurface {
                 .flat_map(conv::map_vk_present_mode)
                 .collect(),
             composite_alpha_modes: conv::map_vk_composite_alpha(caps.supported_composite_alpha),
+            current_transform: conv::map_vk_surface_transform(caps.current_transform),
         })
     }
 
@@ -208,6 +209,26 @@ impl Surface for NativeSurface {
             raw_view_formats.push(original_format);
         }
 
+        // Pre-rotation, when the caller asks for it and the surface can take it.
+        let mut pre_transform = conv::map_surface_transform(config.pre_transform);
+        if pre_transform != vk::SurfaceTransformFlagsKHR::IDENTITY {
+            let supported = unsafe {
+                self.functor.get_physical_device_surface_capabilities(
+                    device.shared.physical_device,
+                    self.raw,
+                )
+            }
+            .map(|caps| caps.supported_transforms)
+            .unwrap_or(vk::SurfaceTransformFlagsKHR::empty());
+            if !supported.contains(pre_transform) {
+                log::warn!(
+                    "Surface can't take pre-transform {:?}; presenting as drawn",
+                    config.pre_transform
+                );
+                pre_transform = vk::SurfaceTransformFlagsKHR::IDENTITY;
+            }
+        }
+
         let mut info = vk::SwapchainCreateInfoKHR::default()
             .flags(raw_flags)
             .surface(self.raw)
@@ -221,7 +242,7 @@ impl Surface for NativeSurface {
             .image_array_layers(config.extent.depth_or_array_layers)
             .image_usage(conv::map_texture_usage(config.usage))
             .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
-            .pre_transform(vk::SurfaceTransformFlagsKHR::IDENTITY)
+            .pre_transform(pre_transform)
             .composite_alpha(conv::map_composite_alpha_mode(config.composite_alpha_mode))
             .present_mode(conv::map_present_mode(config.present_mode))
             .clipped(true)
@@ -294,7 +315,11 @@ impl Surface for NativeSurface {
             device: Arc::clone(&device.shared),
             images,
             fence,
-            config: config.clone(),
+            // With the transform applied, so a fallback to identity isn't reported as suboptimal.
+            config: crate::SurfaceConfiguration {
+                pre_transform: conv::map_vk_surface_transform(pre_transform),
+                ..config.clone()
+            },
             acquire_semaphores,
             next_acquire_index: 0,
             present_semaphores,
@@ -478,10 +503,14 @@ impl Swapchain for NativeSwapchain {
                 acquire_fence,
             )
         } {
-            // We treat `VK_SUBOPTIMAL_KHR` as `VK_SUCCESS` on Android.
+            // We treat `VK_SUBOPTIMAL_KHR` as `VK_SUCCESS` on Android, unless the swapchain is
+            // pre-rotated: then it means the display turned and the caller should reconfigure.
             // See the comment in `Queue::present`.
             #[cfg(target_os = "android")]
-            Ok((index, _)) => (index, false),
+            Ok((index, suboptimal)) => (
+                index,
+                suboptimal && self.config.pre_transform != wgt::SurfaceTransform::Identity,
+            ),
             #[cfg(not(target_os = "android"))]
             Ok(pair) => pair,
             Err(error) => {
@@ -626,7 +655,8 @@ impl Swapchain for NativeSwapchain {
             // We treat `VK_SUBOPTIMAL_KHR` as `VK_SUCCESS` on Android.
             // On Android 10+, libvulkan's `vkQueuePresentKHR` implementation returns `VK_SUBOPTIMAL_KHR` if not doing pre-rotation
             // (i.e `VkSwapchainCreateInfoKHR::preTransform` not being equal to the current device orientation).
-            // This is always the case when the device orientation is anything other than the identity one, as we unconditionally use `VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR`.
+            // That is every frame for callers that don't pre-rotate (`SurfaceConfiguration::pre_transform` left at
+            // identity), and after the display turns for those that do, until they reconfigure.
             #[cfg(not(target_os = "android"))]
             log::debug!("Suboptimal present of frame {}", texture.index);
         }

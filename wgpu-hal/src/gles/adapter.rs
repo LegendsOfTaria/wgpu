@@ -1387,6 +1387,7 @@ impl crate::Adapter for super::Adapter {
                 maximum_frame_latency: 2..=2, //TODO, unused currently
                 current_extent: None,
                 usage: wgt::TextureUses::COLOR_TARGET,
+                current_transform: wgt::SurfaceTransform::Identity,
             })
         } else {
             None

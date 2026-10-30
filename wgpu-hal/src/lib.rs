@@ -2153,6 +2153,9 @@ pub struct SurfaceCapabilities {
     ///
     /// Must be at least one.
     pub composite_alpha_modes: Vec<wgt::CompositeAlphaMode>,
+
+    /// How the display is turned from its panel right now.
+    pub current_transform: wgt::SurfaceTransform,
 }
 
 impl SurfaceCapabilities {
@@ -2739,6 +2742,8 @@ pub struct SurfaceConfiguration {
     /// Allows views of swapchain texture to have a different format
     /// than the texture does.
     pub view_formats: Vec<wgt::TextureFormat>,
+    /// How the images are already turned to the display's panel.
+    pub pre_transform: wgt::SurfaceTransform,
 }
 
 #[derive(Debug, Clone)]
