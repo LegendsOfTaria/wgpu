@@ -52,6 +52,7 @@ macro_rules! trait_alias {
 trait_alias!(RequestAdapterFuture: Future<Output = Result<DispatchAdapter, wgt::RequestAdapterError>> + WasmNotSend + 'static);
 trait_alias!(RequestDeviceFuture: Future<Output = Result<(DispatchDevice, DispatchQueue), crate::RequestDeviceError>> + WasmNotSend + 'static);
 trait_alias!(PopErrorScopeFuture: Future<Output = Option<crate::Error>> + WasmNotSend + 'static);
+trait_alias!(CreateRenderPipelineFuture: Future<Output = DispatchRenderPipeline> + WasmNotSend + 'static);
 trait_alias!(ShaderCompilationInfoFuture: Future<Output = crate::CompilationInfo> + WasmNotSend + 'static);
 trait_alias!(EnumerateAdapterFuture: Future<Output = Vec<DispatchAdapter>> + WasmNotSend + 'static);
 
@@ -168,6 +169,14 @@ pub trait DeviceInterface: CommonTraits {
         &self,
         desc: &crate::RenderPipelineDescriptor<'_>,
     ) -> DispatchRenderPipeline;
+    /// Like [`Self::create_render_pipeline`], without blocking where the backend can compile it elsewhere
+    /// (a browser's `createRenderPipelineAsync`). The others create it at once.
+    fn create_render_pipeline_async(
+        &self,
+        desc: &crate::RenderPipelineDescriptor<'_>,
+    ) -> Pin<Box<dyn CreateRenderPipelineFuture>> {
+        Box::pin(core::future::ready(self.create_render_pipeline(desc)))
+    }
     fn create_mesh_pipeline(
         &self,
         desc: &crate::MeshPipelineDescriptor<'_>,
