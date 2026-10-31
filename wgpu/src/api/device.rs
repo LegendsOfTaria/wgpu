@@ -258,6 +258,21 @@ impl Device {
         RenderPipeline { inner: pipeline }
     }
 
+    /// Creates a [`RenderPipeline`] without blocking the calling thread where the backend allows it: in a
+    /// browser through `createRenderPipelineAsync`, which compiles it away from the page's main thread. Other
+    /// backends create it at once, and the future is ready.
+    pub fn create_render_pipeline_async(
+        &self,
+        desc: &RenderPipelineDescriptor<'_>,
+    ) -> impl Future<Output = RenderPipeline> + WasmNotSend + 'static {
+        let pipeline = self.inner.create_render_pipeline_async(desc);
+        async move {
+            RenderPipeline {
+                inner: pipeline.await,
+            }
+        }
+    }
+
     /// Creates a mesh shader based [`RenderPipeline`].
     #[must_use]
     pub fn create_mesh_pipeline(&self, desc: &MeshPipelineDescriptor<'_>) -> RenderPipeline {
