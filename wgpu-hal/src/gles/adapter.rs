@@ -948,6 +948,24 @@ impl super::Adapter {
         let downlevel_defaults = wgt::DownlevelLimits {};
         let max_samples = unsafe { gl.get_parameter_i32(glow::MAX_SAMPLES) };
 
+        // WebGL has no program binaries.
+        let program_binary_formats = if cfg!(native)
+            && (es_ver.is_some()
+                || full_ver.is_some_and(|v| v >= (4, 1))
+                || extensions.contains("GL_ARB_get_program_binary"))
+        {
+            unsafe { gl.get_parameter_i32(glow::NUM_PROGRAM_BINARY_FORMATS) }
+        } else {
+            0
+        };
+        let program_binary_key = super::program_binary::validation_key(
+            &vendor,
+            &renderer,
+            &version,
+            program_binary_formats,
+        );
+        features.set(wgt::Features::PIPELINE_CACHE, program_binary_key.is_some());
+
         // Drop the GL guard so we can move the context into AdapterShared
         // ( on Wasm the gl handle is just a ref so we tell clippy to allow
         // dropping the ref )
@@ -966,6 +984,7 @@ impl super::Adapter {
                     shading_language_version,
                     next_shader_id: Default::default(),
                     program_cache: Default::default(),
+                    program_binary_key,
                     es: es_ver.is_some(),
                     max_msaa_samples: max_samples,
                 }),

@@ -170,6 +170,12 @@ pub fn pipeline_cache_key(adapter_info: &wgt::AdapterInfo) -> Option<String> {
             "wgpu_pipeline_cache_vulkan_{}_{}",
             adapter_info.vendor, adapter_info.device
         )),
+        // GL's vendor is guessed from its strings and its device is unknown; the cache's validation key, from the
+        // driver's vendor, renderer and version strings, tells one driver from another.
+        wgt::Backend::Gl => Some(format!(
+            "wgpu_pipeline_cache_gl_{}_{}",
+            adapter_info.vendor, adapter_info.device
+        )),
         _ => None,
     }
 }
