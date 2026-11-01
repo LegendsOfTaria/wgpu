@@ -94,9 +94,11 @@ mod command;
 mod conv;
 mod device;
 mod fence;
+mod program_binary;
 mod queue;
 
 pub use fence::Fence;
+pub use program_binary::PipelineCache;
 
 #[cfg(not(any(windows, webgl)))]
 pub use self::egl::{AdapterContext, AdapterContextLock};
@@ -296,6 +298,8 @@ struct AdapterShared {
     shading_language_version: naga::back::glsl::Version,
     next_shader_id: AtomicU32,
     program_cache: Mutex<ProgramCache>,
+    /// Set where linked programs can be kept between runs ([`PipelineCache`]): the key of this driver's.
+    program_binary_key: Option<[u8; 16]>,
     es: bool,
 
     /// Result of `gl.get_parameter_i32(glow::MAX_SAMPLES)`.
@@ -316,6 +320,7 @@ impl fmt::Debug for AdapterShared {
             shading_language_version,
             next_shader_id,
             program_cache: _,
+            program_binary_key,
             es,
             max_msaa_samples,
         } = self;
@@ -327,6 +332,7 @@ impl fmt::Debug for AdapterShared {
             .field("options", options)
             .field("shading_language_version", shading_language_version)
             .field("next_shader_id", next_shader_id)
+            .field("program_binary_key", program_binary_key)
             .field("es", es)
             .field("max_msaa_samples", max_msaa_samples)
             .finish_non_exhaustive()
@@ -848,11 +854,6 @@ impl crate::DynQuerySet for QuerySet {}
 pub struct AccelerationStructure;
 
 impl crate::DynAccelerationStructure for AccelerationStructure {}
-
-#[derive(Debug)]
-pub struct PipelineCache;
-
-impl crate::DynPipelineCache for PipelineCache {}
 
 #[derive(Clone, Debug, PartialEq)]
 struct StencilOps {

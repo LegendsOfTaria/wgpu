@@ -1164,6 +1164,8 @@ bitflags_array! {
         ///
         /// Supported platforms:
         /// - Vulkan
+        /// - OpenGL / OpenGL ES (native): linked programs, through `glGetProgramBinary`, where the driver gives
+        ///   them and isn't known to break them
         ///
         /// Unimplemented Platforms:
         /// - DX12
