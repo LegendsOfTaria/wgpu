@@ -88,6 +88,11 @@ impl SemaphoreList {
 
         let timeline_info = timeline_info.write(vk::TimelineSemaphoreSubmitInfo::default());
 
+        if !wait_semaphores.values.is_empty() || !signal_semaphores.values.is_empty() {
+            wait_semaphores.pad_values();
+            signal_semaphores.pad_values();
+        }
+
         let mut uses_timeline = false;
 
         if !wait_semaphores.values.is_empty() {
@@ -215,4 +220,118 @@ impl SemaphoreList {
 pub enum SemaphoreType {
     Binary(vk::Semaphore),
     Timeline(vk::Semaphore, u64),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ash::vk::Handle;
+    use std::mem::MaybeUninit;
+
+    #[test]
+    fn binary_wait_timeline_signal_pads_wait_values() {
+        let mut wait = SemaphoreList::new(SemaphoreListMode::Wait);
+        let mut signal = SemaphoreList::new(SemaphoreListMode::Signal);
+        wait.push_wait(
+            SemaphoreType::Binary(vk::Semaphore::from_raw(1)),
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+        );
+        signal.push_signal(SemaphoreType::Timeline(vk::Semaphore::from_raw(2), 42));
+
+        let mut tl = MaybeUninit::uninit();
+        let submit = SemaphoreList::add_to_submit(
+            &mut wait,
+            &mut signal,
+            vk::SubmitInfo::default(),
+            &mut tl,
+        );
+        let tl_ptr = submit.p_next as *const vk::TimelineSemaphoreSubmitInfo;
+
+        assert!(!submit.p_next.is_null());
+        assert_eq!(submit.wait_semaphore_count, 1);
+        assert_eq!(unsafe { (*tl_ptr).wait_semaphore_value_count }, 1);
+        assert_eq!(unsafe { *(*tl_ptr).p_wait_semaphore_values }, !0);
+        assert_eq!(submit.signal_semaphore_count, 1);
+        assert_eq!(unsafe { (*tl_ptr).signal_semaphore_value_count }, 1);
+        assert_eq!(unsafe { *(*tl_ptr).p_signal_semaphore_values }, 42);
+    }
+
+    #[test]
+    fn timeline_wait_binary_signal_pads_signal_values() {
+        let mut wait = SemaphoreList::new(SemaphoreListMode::Wait);
+        let mut signal = SemaphoreList::new(SemaphoreListMode::Signal);
+        wait.push_wait(
+            SemaphoreType::Timeline(vk::Semaphore::from_raw(1), 10),
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+        );
+        signal.push_signal(SemaphoreType::Binary(vk::Semaphore::from_raw(2)));
+
+        let mut tl = MaybeUninit::uninit();
+        let submit = SemaphoreList::add_to_submit(
+            &mut wait,
+            &mut signal,
+            vk::SubmitInfo::default(),
+            &mut tl,
+        );
+        let tl_ptr = submit.p_next as *const vk::TimelineSemaphoreSubmitInfo;
+
+        assert!(!submit.p_next.is_null());
+        assert_eq!(submit.wait_semaphore_count, 1);
+        assert_eq!(unsafe { (*tl_ptr).wait_semaphore_value_count }, 1);
+        assert_eq!(unsafe { *(*tl_ptr).p_wait_semaphore_values }, 10);
+        assert_eq!(submit.signal_semaphore_count, 1);
+        assert_eq!(unsafe { (*tl_ptr).signal_semaphore_value_count }, 1);
+        assert_eq!(unsafe { *(*tl_ptr).p_signal_semaphore_values }, !0);
+    }
+
+    #[test]
+    fn binary_wait_binary_signal_omits_timeline_struct() {
+        let mut wait = SemaphoreList::new(SemaphoreListMode::Wait);
+        let mut signal = SemaphoreList::new(SemaphoreListMode::Signal);
+        wait.push_wait(
+            SemaphoreType::Binary(vk::Semaphore::from_raw(1)),
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+        );
+        signal.push_signal(SemaphoreType::Binary(vk::Semaphore::from_raw(2)));
+
+        let mut tl = MaybeUninit::uninit();
+        let submit = SemaphoreList::add_to_submit(
+            &mut wait,
+            &mut signal,
+            vk::SubmitInfo::default(),
+            &mut tl,
+        );
+
+        assert!(submit.p_next.is_null());
+        assert_eq!(submit.wait_semaphore_count, 1);
+        assert_eq!(submit.signal_semaphore_count, 1);
+    }
+
+    #[test]
+    fn timeline_wait_timeline_signal_preserves_both_values() {
+        let mut wait = SemaphoreList::new(SemaphoreListMode::Wait);
+        let mut signal = SemaphoreList::new(SemaphoreListMode::Signal);
+        wait.push_wait(
+            SemaphoreType::Timeline(vk::Semaphore::from_raw(1), 100),
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+        );
+        signal.push_signal(SemaphoreType::Timeline(vk::Semaphore::from_raw(2), 200));
+
+        let mut tl = MaybeUninit::uninit();
+        let submit = SemaphoreList::add_to_submit(
+            &mut wait,
+            &mut signal,
+            vk::SubmitInfo::default(),
+            &mut tl,
+        );
+        let tl_ptr = submit.p_next as *const vk::TimelineSemaphoreSubmitInfo;
+
+        assert!(!submit.p_next.is_null());
+        assert_eq!(submit.wait_semaphore_count, 1);
+        assert_eq!(unsafe { (*tl_ptr).wait_semaphore_value_count }, 1);
+        assert_eq!(unsafe { *(*tl_ptr).p_wait_semaphore_values }, 100);
+        assert_eq!(submit.signal_semaphore_count, 1);
+        assert_eq!(unsafe { (*tl_ptr).signal_semaphore_value_count }, 1);
+        assert_eq!(unsafe { *(*tl_ptr).p_signal_semaphore_values }, 200);
+    }
 }
