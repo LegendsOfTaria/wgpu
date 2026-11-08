@@ -1030,6 +1030,7 @@ fn request_adapter_null_error(requested_backends: Backends) -> wgt::RequestAdapt
 
 fn future_request_device(
     result: Result<webgpu_sys::GpuDevice, wasm_bindgen::JsValue>,
+    adapter_info: &crate::AdapterInfo,
 ) -> Result<(dispatch::DispatchDevice, dispatch::DispatchQueue), crate::RequestDeviceError> {
     result
         .map(|device| {
@@ -1044,6 +1045,7 @@ fn future_request_device(
             (
                 WebDevice {
                     inner: device,
+                    adapter_info: adapter_info.clone(),
                     ident: crate::cmp::Identifier::create(),
                     error_scope_count: Rc::new(Cell::new(0)),
                 }
@@ -1371,6 +1373,7 @@ pub struct WebAdapter {
 #[derive(Debug, Clone)]
 pub struct WebDevice {
     pub(crate) inner: webgpu_sys::GpuDevice,
+    adapter_info: crate::AdapterInfo,
     /// Unique identifier for this Device.
     ident: crate::cmp::Identifier,
     /// Current number of error scopes that have been pushed on the device.
@@ -1908,9 +1911,10 @@ impl dispatch::AdapterInterface for WebAdapter {
 
         let device_promise = self.inner.request_device_with_descriptor(&mapped_desc);
 
+        let adapter_info = map_adapter_info(&self.inner.info());
         Box::pin(MakeSendFuture::new(
             wasm_bindgen_futures::JsFuture::from(device_promise),
-            future_request_device,
+            move |result| future_request_device(result, &adapter_info),
         ))
     }
 
@@ -1995,7 +1999,7 @@ impl dispatch::DeviceInterface for WebDevice {
     }
 
     fn adapter_info(&self) -> crate::AdapterInfo {
-        map_adapter_info(&self.inner.adapter_info())
+        self.adapter_info.clone()
     }
 
     fn create_shader_module(
