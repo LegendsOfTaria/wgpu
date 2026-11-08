@@ -44,6 +44,10 @@ Bottom level categories:
 
 ### Bug Fixes
 
+#### WebGPU
+
+- Query device adapter information using the originating adapter, supporting Safari versions without GPUDevice.adapterInfo. In [#9](https://github.com/LegendsOfTaria/wgpu/pull/9).
+
 #### GLES / OpenGL
 
 - Fix rejected buffer uploads and black rendering on Android drivers with immutable buffer storage support.
