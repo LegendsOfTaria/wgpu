@@ -1502,10 +1502,18 @@ impl crate::Device for super::Device {
                 vk::DescriptorSetLayoutCreateFlags::empty()
             });
 
-        let mut binding_flag_info =
-            vk::DescriptorSetLayoutBindingFlagsCreateInfo::default().binding_flags(&binding_flags);
-
-        let vk_info = vk_info.push_next(&mut binding_flag_info);
+        // Only chain VkDescriptorSetLayoutBindingFlagsCreateInfo when binding flags
+        // are actually in use. Vulkan 1.1 implementations lacking VK_EXT_descriptor_indexing
+        // (such as PowerVR Rogue drivers) reject extension structs in pNext with
+        // "Extensions not supported for VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO".
+        let mut binding_flag_info;
+        let vk_info = if contains_binding_arrays || binding_flags.iter().any(|f| !f.is_empty()) {
+            binding_flag_info = vk::DescriptorSetLayoutBindingFlagsCreateInfo::default()
+                .binding_flags(&binding_flags);
+            vk_info.push_next(&mut binding_flag_info)
+        } else {
+            vk_info
+        };
 
         let raw = unsafe {
             self.shared

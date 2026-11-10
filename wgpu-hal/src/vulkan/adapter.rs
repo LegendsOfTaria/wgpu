@@ -2390,9 +2390,19 @@ impl super::Instance {
 
         let alignments = phd_capabilities.to_hal_alignments(has_robust_buffer_access2);
 
+        // PowerVR proprietary drivers (especially Rogue GE8320/GE8300 on DDK 1.11-1.15)
+        // do not handle VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO (1000117002) in their
+        // internal switch statement and log "Unknown extension. 1000117002" to logd on every
+        // view creation, severely degrading frame rate.
+        // Disabling image_view_usage causes views to safely inherit the parent image usage per
+        // Vulkan Specification Section 12.5.
+        let is_powervr = phd_capabilities.properties.vendor_id == crate::auxil::db::imgtec::VENDOR
+            || phd_capabilities.is_driver(vk::DriverId::IMAGINATION_PROPRIETARY);
+
         let private_caps = super::PrivateCapabilities {
-            image_view_usage: phd_capabilities.device_api_version >= vk::API_VERSION_1_1
-                || phd_capabilities.supports_extension(khr::maintenance2::NAME),
+            image_view_usage: (phd_capabilities.device_api_version >= vk::API_VERSION_1_1
+                || phd_capabilities.supports_extension(khr::maintenance2::NAME))
+                && !is_powervr,
             timeline_semaphores: match phd_features.timeline_semaphore {
                 Some(features) => features.timeline_semaphore == vk::TRUE,
                 None => phd_features
