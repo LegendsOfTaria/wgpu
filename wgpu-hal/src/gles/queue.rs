@@ -775,21 +775,7 @@ impl super::Queue {
                 unsafe { gl.pixel_store_i32(glow::UNPACK_ROW_LENGTH, row_texels as i32) };
                 unsafe { gl.pixel_store_i32(glow::UNPACK_IMAGE_HEIGHT, column_texels as i32) };
                 let mut unbind_unpack_buffer = false;
-                let mut temp_pbo = None;
                 if !dst_format.is_compressed() {
-                    let bytes_per_row = copy
-                        .buffer_layout
-                        .bytes_per_row
-                        .unwrap_or(copy.size.width * block_size);
-                    let rows_per_image = copy
-                        .buffer_layout
-                        .rows_per_image
-                        .unwrap_or(copy.size.height);
-                    let bytes_per_image = bytes_per_row * rows_per_image;
-                    let bytes_in_upload = (bytes_per_image * copy.size.depth.saturating_sub(1))
-                        + (bytes_per_row * copy.size.height.saturating_sub(1))
-                        + (copy.size.width * block_size);
-
                     let map_state;
                     let unpack_data = match src.raw {
                         Some(buffer) => {
@@ -801,39 +787,7 @@ impl super::Queue {
                             map_state = lock(&src.map_state);
                             let src_data = &map_state.data.as_ref().unwrap().as_slice()
                                 [copy.buffer_layout.offset as usize..];
-                            let upload_slice = if (bytes_in_upload as usize) < src_data.len() {
-                                &src_data[..bytes_in_upload as usize]
-                            } else {
-                                src_data
-                            };
-
-                            #[cfg(not(webgl))]
-                            if is_layered_target(dst_target) {
-                                // On Android GLES where staging buffers reside in client memory (EMULATE_BUFFER_MAP_WRITE),
-                                // passing a client pointer to glTexSubImage3D triggers a fatal crash on multithreaded drivers
-                                // (e.g. PowerVR Rogue on MediaTek Android 10 libGLESv2_mtk.so) because their worker thread
-                                // command queue expects a PBO offset for 3D/layered unpacks. Staging through a transient PBO
-                                // ensures the driver dispatches the transfer with a valid GPU buffer.
-                                if let Ok(pbo) = unsafe { gl.create_buffer() } {
-                                    unsafe {
-                                        gl.bind_buffer(glow::PIXEL_UNPACK_BUFFER, Some(pbo));
-                                        gl.buffer_data_u8_slice(
-                                            glow::PIXEL_UNPACK_BUFFER,
-                                            upload_slice,
-                                            glow::STREAM_DRAW,
-                                        );
-                                    };
-                                    unbind_unpack_buffer = true;
-                                    temp_pbo = Some(pbo);
-                                    glow::PixelUnpackData::BufferOffset(0)
-                                } else {
-                                    glow::PixelUnpackData::Slice(Some(upload_slice))
-                                }
-                            } else {
-                                glow::PixelUnpackData::Slice(Some(upload_slice))
-                            }
-                            #[cfg(webgl)]
-                            glow::PixelUnpackData::Slice(Some(upload_slice))
+                            glow::PixelUnpackData::Slice(Some(src_data))
                         }
                     };
                     if is_layered_target(dst_target) {
@@ -897,27 +851,6 @@ impl super::Queue {
                             map_state = lock(&src.map_state);
                             let src_data = &map_state.data.as_ref().unwrap().as_slice()
                                 [(offset as usize)..(offset + bytes_in_upload) as usize];
-                            #[cfg(not(webgl))]
-                            if is_layered_target(dst_target) {
-                                if let Ok(pbo) = unsafe { gl.create_buffer() } {
-                                    unsafe {
-                                        gl.bind_buffer(glow::PIXEL_UNPACK_BUFFER, Some(pbo));
-                                        gl.buffer_data_u8_slice(
-                                            glow::PIXEL_UNPACK_BUFFER,
-                                            src_data,
-                                            glow::STREAM_DRAW,
-                                        );
-                                    };
-                                    unbind_unpack_buffer = true;
-                                    temp_pbo = Some(pbo);
-                                    glow::CompressedPixelUnpackData::BufferRange(0..bytes_in_upload)
-                                } else {
-                                    glow::CompressedPixelUnpackData::Slice(src_data)
-                                }
-                            } else {
-                                glow::CompressedPixelUnpackData::Slice(src_data)
-                            }
-                            #[cfg(webgl)]
                             glow::CompressedPixelUnpackData::Slice(src_data)
                         }
                     };
@@ -954,9 +887,6 @@ impl super::Queue {
                 }
                 if unbind_unpack_buffer {
                     unsafe { gl.bind_buffer(glow::PIXEL_UNPACK_BUFFER, None) };
-                }
-                if let Some(pbo) = temp_pbo {
-                    unsafe { gl.delete_buffer(pbo) };
                 }
             }
             C::CopyTextureToBuffer {
