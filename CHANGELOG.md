@@ -50,6 +50,7 @@ Bottom level categories:
 
 #### GLES / OpenGL
 
+- Stage layered texture uploads through a pixel unpack buffer when buffers are emulated in client memory, preventing worker thread crashes on multithreaded mobile drivers.
 - Fix rejected buffer uploads and black rendering on Android drivers with immutable buffer storage support.
 - Fix black EGL windows by explicitly selecting the window draw buffer before presentation, using the appropriate desktop OpenGL or GLES enum.
 - Allow OpenGL presentation on explicit Wayland and X11 displays when EGL window configurations do not support native rendering APIs, including NVIDIA drivers.
