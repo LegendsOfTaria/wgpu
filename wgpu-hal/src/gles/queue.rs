@@ -771,9 +771,27 @@ impl super::Queue {
                     .rows_per_image
                     .map_or(0, |rpi| block_height * rpi);
 
+                // Per OpenGL ES 3.2 §3.8.4, UNPACK_ROW_LENGTH and UNPACK_IMAGE_HEIGHT default to 0
+                // (tightly packed, using copy width and height). Avoid setting non-zero unpack strides
+                // when rows/images are unpadded or when copying a single layer (depth <= 1).
+                // Passing a non-zero UNPACK_IMAGE_HEIGHT for single-layer uploads or tightly-packed
+                // client-memory slices triggers a buggy strided 3D volume unpack routine in certain
+                // mobile drivers (e.g. PowerVR Rogue on MediaTek Android GLES) and causes a SIGSEGV.
+                let unpack_row_length = if row_texels > copy.size.width {
+                    row_texels
+                } else {
+                    0
+                };
+                let unpack_image_height =
+                    if copy.size.depth > 1 && column_texels > copy.size.height {
+                        column_texels
+                    } else {
+                        0
+                    };
+
                 unsafe { gl.bind_texture(dst_target, Some(dst)) };
-                unsafe { gl.pixel_store_i32(glow::UNPACK_ROW_LENGTH, row_texels as i32) };
-                unsafe { gl.pixel_store_i32(glow::UNPACK_IMAGE_HEIGHT, column_texels as i32) };
+                unsafe { gl.pixel_store_i32(glow::UNPACK_ROW_LENGTH, unpack_row_length as i32) };
+                unsafe { gl.pixel_store_i32(glow::UNPACK_IMAGE_HEIGHT, unpack_image_height as i32) };
                 let mut unbind_unpack_buffer = false;
                 if !dst_format.is_compressed() {
                     let map_state;
@@ -887,6 +905,12 @@ impl super::Queue {
                 }
                 if unbind_unpack_buffer {
                     unsafe { gl.bind_buffer(glow::PIXEL_UNPACK_BUFFER, None) };
+                }
+                if unpack_row_length != 0 {
+                    unsafe { gl.pixel_store_i32(glow::UNPACK_ROW_LENGTH, 0) };
+                }
+                if unpack_image_height != 0 {
+                    unsafe { gl.pixel_store_i32(glow::UNPACK_IMAGE_HEIGHT, 0) };
                 }
             }
             C::CopyTextureToBuffer {
