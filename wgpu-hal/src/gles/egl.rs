@@ -1193,9 +1193,13 @@ impl Surface {
         unsafe { gl.draw_buffers(&[draw_buffer]) };
         unsafe { gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(sc.framebuffer)) };
 
+        // Disable sRGB conversions for `glBlitFramebuffer` as behavior does diverge between
+        // drivers and formats otherwise and we want to ensure no sRGB conversions happen.
+        // However, on Android GLES, sc.framebuffer is SRGB8_ALPHA8 and reading from it decodes sRGB
+        // to linear. Disabling FRAMEBUFFER_SRGB prevents re-encoding back to sRGB on write to the
+        // window surface, dumping raw linear values to the display and causing severe gamma darkening.
+        #[cfg(not(target_os = "android"))]
         if !matches!(self.srgb_kind, SrgbFrameBufferKind::None) {
-            // Disable sRGB conversions for `glBlitFramebuffer` as behavior does diverge between
-            // drivers and formats otherwise and we want to ensure no sRGB conversions happen.
             unsafe { gl.disable(glow::FRAMEBUFFER_SRGB) };
         }
 
@@ -1217,6 +1221,7 @@ impl Surface {
             )
         };
 
+        #[cfg(not(target_os = "android"))]
         if !matches!(self.srgb_kind, SrgbFrameBufferKind::None) {
             unsafe { gl.enable(glow::FRAMEBUFFER_SRGB) };
         }
