@@ -1047,10 +1047,24 @@ impl crate::Instance for Instance {
             });
         }
 
+        // On Android, vendor GLES drivers (e.g. MediaTek MT6765 / PowerVR Rogue GE8320 in libGLESv2_mtk.so)
+        // have fatal bugs in their debug message formatting (such as glTexSubImage3D formatting a 9-specifier
+        // notification string with only 8 parameters, causing a NULL/garbage pointer dereference in vsnprintf/strlen).
+        // Furthermore, Android lacks system-provided GLES validation layers. Do not enable GL_DEBUG_OUTPUT on Android.
+        #[cfg(not(target_os = "android"))]
         if self.flags.contains(wgt::InstanceFlags::VALIDATION) && gl.supports_debug() {
             log::debug!("Enabling GLES debug output");
             unsafe { gl.enable(glow::DEBUG_OUTPUT) };
             unsafe { gl.debug_message_callback(super::gl_debug_message_callback) };
+            unsafe {
+                gl.debug_message_control(
+                    glow::DONT_CARE,
+                    glow::DONT_CARE,
+                    glow::DEBUG_SEVERITY_NOTIFICATION,
+                    &[],
+                    false,
+                );
+            }
         }
 
         // Wrap in ManuallyDrop to make it easier to "current" the GL context before dropping this
