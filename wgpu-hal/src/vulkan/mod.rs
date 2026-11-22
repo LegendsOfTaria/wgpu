@@ -820,7 +820,7 @@ pub struct Texture {
     format: wgt::TextureFormat,
     copy_size: crate::CopyExtent,
     identity: ResourceIdentity<vk::Image>,
-    surface_view: Option<Arc<SurfaceImageView>>,
+    surface_view: Option<IdentifiedTextureView>,
 
     // The `drop_guard` field must be the last field of this struct so it is dropped last.
     // Do not add new fields after it.
@@ -846,48 +846,9 @@ impl Texture {
     }
 }
 
-struct SurfaceImageView {
-    device: Arc<DeviceShared>,
-    // The clear and application views can request different Vulkan usage restrictions.
-    views: Mutex<ArrayVec<(Option<vk::ImageUsageFlags>, IdentifiedTextureView), 2>>,
-}
-
-impl SurfaceImageView {
-    fn get_or_create(
-        self: &Arc<Self>,
-        usage: Option<vk::ImageUsageFlags>,
-        create: impl FnOnce() -> Result<IdentifiedTextureView, crate::DeviceError>,
-    ) -> Result<(IdentifiedTextureView, Option<Arc<Self>>), crate::DeviceError> {
-        let mut views = self.views.lock();
-        if let Some((_, view)) = views.iter().find(|(key, _)| *key == usage) {
-            return Ok((*view, Some(Arc::clone(self))));
-        }
-        let view = create()?;
-        if views.is_full() {
-            return Ok((view, None));
-        }
-        views.push((usage, view));
-        Ok((view, Some(Arc::clone(self))))
-    }
-}
-
-impl fmt::Debug for SurfaceImageView {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SurfaceImageView").finish_non_exhaustive()
-    }
-}
-
-impl Drop for SurfaceImageView {
-    fn drop(&mut self) {
-        for (_, view) in self.views.get_mut().drain(..) {
-            unsafe { self.device.raw.destroy_image_view(view.raw, None) };
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct TextureView {
-    surface_view: Option<Arc<SurfaceImageView>>,
+    owned_by_swapchain: bool,
     raw_texture: vk::Image,
     raw: vk::ImageView,
     _layers: NonZeroU32,
@@ -1070,7 +1031,7 @@ impl FramebufferKey {
 }
 
 /// A texture view paired with its identity.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 struct IdentifiedTextureView {
     raw: vk::ImageView,
     identity: ResourceIdentity<vk::ImageView>,

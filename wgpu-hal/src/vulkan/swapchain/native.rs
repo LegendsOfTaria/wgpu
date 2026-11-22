@@ -309,25 +309,11 @@ impl Surface for NativeSurface {
             .map(|i| Arc::new(Mutex::new(SwapchainPresentSemaphores::new(i))))
             .collect::<Vec<_>>();
 
-        Ok(Box::new(NativeSwapchain {
+        let mut swapchain = NativeSwapchain {
             raw,
             functor,
             device: Arc::clone(&device.shared),
-            surface_views: if cfg!(target_os = "android")
-                && config.extent.depth_or_array_layers == 1
-            {
-                images
-                    .iter()
-                    .map(|_| {
-                        Arc::new(crate::vulkan::SurfaceImageView {
-                            device: device.shared.clone(),
-                            views: Mutex::default(),
-                        })
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            },
+            surface_views: Vec::new(),
             images,
             fence,
             // With the transform applied, so a fallback to identity isn't reported as suboptimal.
@@ -339,7 +325,38 @@ impl Surface for NativeSurface {
             next_acquire_index: 0,
             present_semaphores,
             next_present_time: None,
-        }))
+        };
+        if cfg!(target_os = "android")
+            && config.extent.depth_or_array_layers == 1
+            && config.usage == wgt::TextureUses::COLOR_TARGET
+        {
+            let info = vk::ImageViewCreateInfo::default()
+                .view_type(vk::ImageViewType::TYPE_2D)
+                .format(original_format)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    level_count: 1,
+                    layer_count: 1,
+                    ..Default::default()
+                });
+            swapchain.surface_views.reserve(swapchain.images.len());
+            for &image in &swapchain.images {
+                let view = unsafe {
+                    device.shared.create_identified_image_view(
+                        &info.image(image),
+                        Some("swapchain color attachment"),
+                    )
+                };
+                match view {
+                    Ok(view) => swapchain.surface_views.push(view),
+                    Err(error) => {
+                        unsafe { swapchain.release_resources(device) };
+                        return Err(error.into());
+                    }
+                }
+            }
+        }
+        Ok(Box::new(swapchain))
     }
 
     #[cfg(windows)]
@@ -357,7 +374,8 @@ pub(crate) struct NativeSwapchain {
     functor: khr::swapchain::Device,
     device: Arc<DeviceShared>,
     images: Vec<vk::Image>,
-    surface_views: Vec<Arc<crate::vulkan::SurfaceImageView>>,
+    // HAL configure/unconfigure require all acquired textures and their views to be retired.
+    surface_views: Vec<crate::vulkan::IdentifiedTextureView>,
     /// Fence used to wait on the acquired image.
     fence: Option<vk::Fence>,
     config: crate::SurfaceConfiguration,
@@ -410,7 +428,9 @@ pub(crate) struct NativeSwapchain {
 
 impl Drop for NativeSwapchain {
     fn drop(&mut self) {
-        self.surface_views.clear();
+        for view in self.surface_views.drain(..) {
+            unsafe { self.device.raw.destroy_image_view(view.raw, None) };
+        }
         unsafe {
             self.functor.destroy_swapchain(self.raw, None);
         }
@@ -577,7 +597,7 @@ impl Swapchain for NativeSwapchain {
             index,
             texture: crate::vulkan::Texture {
                 raw: self.images[index as usize],
-                surface_view: self.surface_views.get(index as usize).cloned(),
+                surface_view: self.surface_views.get(index as usize).copied(),
                 drop_guard: None,
                 memory: crate::vulkan::TextureMemory::External,
                 format: self.config.format,
