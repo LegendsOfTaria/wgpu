@@ -340,7 +340,6 @@ struct RayTracingDeviceExtensionFunctions {
 #[derive(Clone, Debug)]
 struct PrivateCapabilities {
     image_view_usage: bool,
-    reuse_framebuffers: bool,
     timeline_semaphores: bool,
     texture_d24: bool,
     texture_d24_s8: bool,
@@ -849,7 +848,27 @@ impl Texture {
 
 struct SurfaceImageView {
     device: Arc<DeviceShared>,
-    view: Mutex<Option<IdentifiedTextureView>>,
+    // The clear and application views can request different Vulkan usage restrictions.
+    views: Mutex<ArrayVec<(Option<vk::ImageUsageFlags>, IdentifiedTextureView), 2>>,
+}
+
+impl SurfaceImageView {
+    fn get_or_create(
+        self: &Arc<Self>,
+        usage: Option<vk::ImageUsageFlags>,
+        create: impl FnOnce() -> Result<IdentifiedTextureView, crate::DeviceError>,
+    ) -> Result<(IdentifiedTextureView, Option<Arc<Self>>), crate::DeviceError> {
+        let mut views = self.views.lock();
+        if let Some((_, view)) = views.iter().find(|(key, _)| *key == usage) {
+            return Ok((*view, Some(Arc::clone(self))));
+        }
+        let view = create()?;
+        if views.is_full() {
+            return Ok((view, None));
+        }
+        views.push((usage, view));
+        Ok((view, Some(Arc::clone(self))))
+    }
 }
 
 impl fmt::Debug for SurfaceImageView {
@@ -860,7 +879,7 @@ impl fmt::Debug for SurfaceImageView {
 
 impl Drop for SurfaceImageView {
     fn drop(&mut self) {
-        if let Some(view) = self.view.get_mut().take() {
+        for (_, view) in self.views.get_mut().drain(..) {
             unsafe { self.device.raw.destroy_image_view(view.raw, None) };
         }
     }

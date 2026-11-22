@@ -191,11 +191,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
         self.free.append(&mut self.discarded);
         // Only reset_all guarantees every submission from this encoder has retired.
         // Identities in FramebufferKey prevent hits on recycled image-view handles.
-        let mut remaining = if self.device.private_caps.reuse_framebuffers {
-            64
-        } else {
-            0
-        };
+        let mut remaining = if cfg!(target_os = "android") { 64 } else { 0 };
         self.framebuffers.retain(|_, fb| {
             if remaining > 0 && fb.idle_resets < 8 {
                 remaining -= 1;

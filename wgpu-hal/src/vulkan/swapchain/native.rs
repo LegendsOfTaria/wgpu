@@ -313,13 +313,15 @@ impl Surface for NativeSurface {
             raw,
             functor,
             device: Arc::clone(&device.shared),
-            surface_views: if device.shared.private_caps.reuse_framebuffers {
+            surface_views: if cfg!(target_os = "android")
+                && config.extent.depth_or_array_layers == 1
+            {
                 images
                     .iter()
                     .map(|_| {
                         Arc::new(crate::vulkan::SurfaceImageView {
                             device: device.shared.clone(),
-                            view: Mutex::new(None),
+                            views: Mutex::default(),
                         })
                     })
                     .collect()

@@ -1272,10 +1272,11 @@ impl crate::Device for super::Device {
         let layers =
             NonZeroU32::new(subresource_range.layer_count).expect("Unexpected zero layer count");
 
+        let usage = (self.shared.private_caps.image_view_usage && !desc.usage.is_empty())
+            .then(|| conv::map_texture_usage(desc.usage));
         let mut image_view_info;
-        if self.shared.private_caps.image_view_usage && !desc.usage.is_empty() {
-            image_view_info =
-                vk::ImageViewUsageCreateInfo::default().usage(conv::map_texture_usage(desc.usage));
+        if let Some(usage) = usage {
+            image_view_info = vk::ImageViewUsageCreateInfo::default().usage(usage);
             vk_info = vk_info.push_next(&mut image_view_info);
         }
 
@@ -1290,11 +1291,8 @@ impl crate::Device for super::Device {
                 identity: self.shared.texture_view_identity_factory.next(),
             })
         };
-        // A native surface image has one color mip and layer. On these drivers views
-        // inherit image usage, so both the clear and render views have this descriptor.
         let surface_view = texture.surface_view.as_ref().filter(|_| {
-            !self.shared.private_caps.image_view_usage
-                && desc.format == texture.format
+            desc.format == texture.format
                 && desc.dimension == wgt::TextureViewDimension::D2
                 && subresource_range.aspect_mask == vk::ImageAspectFlags::COLOR
                 && subresource_range.base_mip_level == 0
@@ -1305,20 +1303,15 @@ impl crate::Device for super::Device {
                     1 | vk::REMAINING_ARRAY_LAYERS
                 )
         });
-        let super::IdentifiedTextureView { raw, identity } = if let Some(shared) = surface_view {
-            let mut slot = shared.view.lock();
-            match *slot {
-                Some(view) => view,
-                None => *slot.insert(create()?),
-            }
-        } else {
-            create()?
+        let (super::IdentifiedTextureView { raw, identity }, surface_view) = match surface_view {
+            Some(shared) => shared.get_or_create(usage, create)?,
+            None => (create()?, None),
         };
 
         self.counters.texture_views.add(1);
 
         Ok(super::TextureView {
-            surface_view: surface_view.cloned(),
+            surface_view,
             raw_texture: texture.raw,
             raw,
             _layers: layers,
