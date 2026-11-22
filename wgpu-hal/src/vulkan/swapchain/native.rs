@@ -313,6 +313,19 @@ impl Surface for NativeSurface {
             raw,
             functor,
             device: Arc::clone(&device.shared),
+            surface_views: if device.shared.private_caps.reuse_framebuffers {
+                images
+                    .iter()
+                    .map(|_| {
+                        Arc::new(crate::vulkan::SurfaceImageView {
+                            device: device.shared.clone(),
+                            view: Mutex::new(None),
+                        })
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            },
             images,
             fence,
             // With the transform applied, so a fallback to identity isn't reported as suboptimal.
@@ -342,6 +355,7 @@ pub(crate) struct NativeSwapchain {
     functor: khr::swapchain::Device,
     device: Arc<DeviceShared>,
     images: Vec<vk::Image>,
+    surface_views: Vec<Arc<crate::vulkan::SurfaceImageView>>,
     /// Fence used to wait on the acquired image.
     fence: Option<vk::Fence>,
     config: crate::SurfaceConfiguration,
@@ -394,6 +408,7 @@ pub(crate) struct NativeSwapchain {
 
 impl Drop for NativeSwapchain {
     fn drop(&mut self) {
+        self.surface_views.clear();
         unsafe {
             self.functor.destroy_swapchain(self.raw, None);
         }
@@ -560,6 +575,7 @@ impl Swapchain for NativeSwapchain {
             index,
             texture: crate::vulkan::Texture {
                 raw: self.images[index as usize],
+                surface_view: self.surface_views.get(index as usize).cloned(),
                 drop_guard: None,
                 memory: crate::vulkan::TextureMemory::External,
                 format: self.config.format,

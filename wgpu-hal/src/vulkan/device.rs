@@ -309,6 +309,7 @@ impl super::Device {
 
         super::Texture {
             raw: vk_image,
+            surface_view: None,
             drop_guard,
             memory,
             format: desc.format,
@@ -1278,18 +1279,46 @@ impl crate::Device for super::Device {
             vk_info = vk_info.push_next(&mut image_view_info);
         }
 
-        let raw = unsafe { self.shared.raw.create_image_view(&vk_info, None) }
-            .map_err(super::map_host_device_oom_and_ioca_err)?;
-
-        if let Some(label) = desc.label {
-            unsafe { self.shared.set_object_name(raw, label) };
-        }
-
-        let identity = self.shared.texture_view_identity_factory.next();
+        let create = || -> Result<_, crate::DeviceError> {
+            let raw = unsafe { self.shared.raw.create_image_view(&vk_info, None) }
+                .map_err(super::map_host_device_oom_and_ioca_err)?;
+            if let Some(label) = desc.label {
+                unsafe { self.shared.set_object_name(raw, label) };
+            }
+            Ok(super::IdentifiedTextureView {
+                raw,
+                identity: self.shared.texture_view_identity_factory.next(),
+            })
+        };
+        // A native surface image has one color mip and layer. On these drivers views
+        // inherit image usage, so both the clear and render views have this descriptor.
+        let surface_view = texture.surface_view.as_ref().filter(|_| {
+            !self.shared.private_caps.image_view_usage
+                && desc.format == texture.format
+                && desc.dimension == wgt::TextureViewDimension::D2
+                && subresource_range.aspect_mask == vk::ImageAspectFlags::COLOR
+                && subresource_range.base_mip_level == 0
+                && subresource_range.base_array_layer == 0
+                && matches!(subresource_range.level_count, 1 | vk::REMAINING_MIP_LEVELS)
+                && matches!(
+                    subresource_range.layer_count,
+                    1 | vk::REMAINING_ARRAY_LAYERS
+                )
+        });
+        let super::IdentifiedTextureView { raw, identity } = if let Some(shared) = surface_view {
+            let mut slot = shared.view.lock();
+            match *slot {
+                Some(view) => view,
+                None => *slot.insert(create()?),
+            }
+        } else {
+            create()?
+        };
 
         self.counters.texture_views.add(1);
 
         Ok(super::TextureView {
+            surface_view: surface_view.cloned(),
             raw_texture: texture.raw,
             raw,
             _layers: layers,
@@ -1302,7 +1331,9 @@ impl crate::Device for super::Device {
         })
     }
     unsafe fn destroy_texture_view(&self, view: super::TextureView) {
-        unsafe { self.shared.raw.destroy_image_view(view.raw, None) };
+        if view.surface_view.is_none() {
+            unsafe { self.shared.raw.destroy_image_view(view.raw, None) };
+        }
 
         self.counters.texture_views.sub(1);
     }

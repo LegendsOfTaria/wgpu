@@ -340,6 +340,7 @@ struct RayTracingDeviceExtensionFunctions {
 #[derive(Clone, Debug)]
 struct PrivateCapabilities {
     image_view_usage: bool,
+    reuse_framebuffers: bool,
     timeline_semaphores: bool,
     texture_d24: bool,
     texture_d24_s8: bool,
@@ -820,6 +821,7 @@ pub struct Texture {
     format: wgt::TextureFormat,
     copy_size: crate::CopyExtent,
     identity: ResourceIdentity<vk::Image>,
+    surface_view: Option<Arc<SurfaceImageView>>,
 
     // The `drop_guard` field must be the last field of this struct so it is dropped last.
     // Do not add new fields after it.
@@ -845,8 +847,28 @@ impl Texture {
     }
 }
 
+struct SurfaceImageView {
+    device: Arc<DeviceShared>,
+    view: Mutex<Option<IdentifiedTextureView>>,
+}
+
+impl fmt::Debug for SurfaceImageView {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SurfaceImageView").finish_non_exhaustive()
+    }
+}
+
+impl Drop for SurfaceImageView {
+    fn drop(&mut self) {
+        if let Some(view) = self.view.get_mut().take() {
+            unsafe { self.device.raw.destroy_image_view(view.raw, None) };
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct TextureView {
+    surface_view: Option<Arc<SurfaceImageView>>,
     raw_texture: vk::Image,
     raw: vk::ImageView,
     _layers: NonZeroU32,
@@ -1016,6 +1038,11 @@ struct FramebufferKey {
     extent: wgt::Extent3d,
 }
 
+struct CachedFramebuffer {
+    raw: vk::Framebuffer,
+    idle_resets: u8,
+}
+
 impl FramebufferKey {
     fn push_view(&mut self, view: IdentifiedTextureView) {
         self.attachment_identities.push(view.identity);
@@ -1080,7 +1107,7 @@ pub struct CommandEncoder {
     /// the given pool & location.
     end_of_pass_timer_query: Option<(vk::QueryPool, u32)>,
 
-    framebuffers: FastHashMap<FramebufferKey, vk::Framebuffer>,
+    framebuffers: FastHashMap<FramebufferKey, CachedFramebuffer>,
     temp_texture_views: FastHashMap<TempTextureViewKey, IdentifiedTextureView>,
 
     counters: Arc<wgt::HalCounters>,
@@ -1108,7 +1135,7 @@ impl Drop for CommandEncoder {
         }
 
         for (_, fb) in self.framebuffers.drain() {
-            unsafe { self.device.raw.destroy_framebuffer(fb, None) };
+            unsafe { self.device.raw.destroy_framebuffer(fb.raw, None) };
         }
 
         for (_, view) in self.temp_texture_views.drain() {

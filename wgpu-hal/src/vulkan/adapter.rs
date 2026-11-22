@@ -2400,6 +2400,7 @@ impl super::Instance {
             || phd_capabilities.is_driver(vk::DriverId::IMAGINATION_PROPRIETARY);
 
         let private_caps = super::PrivateCapabilities {
+            reuse_framebuffers: cfg!(target_os = "android") && is_powervr,
             image_view_usage: (phd_capabilities.device_api_version >= vk::API_VERSION_1_1
                 || phd_capabilities.supports_extension(khr::maintenance2::NAME))
                 && !is_powervr,
