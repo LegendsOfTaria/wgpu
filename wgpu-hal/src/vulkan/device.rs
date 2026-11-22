@@ -16,6 +16,22 @@ use super::{conv, descriptor::DescriptorCounts, RawTlasInstance};
 use crate::TlasInstance;
 
 impl super::DeviceShared {
+    pub(super) unsafe fn create_identified_image_view(
+        &self,
+        info: &vk::ImageViewCreateInfo<'_>,
+        label: Option<&str>,
+    ) -> Result<super::IdentifiedTextureView, crate::DeviceError> {
+        let raw = unsafe { self.raw.create_image_view(info, None) }
+            .map_err(super::map_host_device_oom_and_ioca_err)?;
+        if let Some(label) = label {
+            unsafe { self.set_object_name(raw, label) };
+        }
+        Ok(super::IdentifiedTextureView {
+            raw,
+            identity: self.texture_view_identity_factory.next(),
+        })
+    }
+
     /// Set the name of `object` to `name`.
     ///
     /// If `name` contains an interior null byte, then the name set will be truncated to that byte.
@@ -309,6 +325,7 @@ impl super::Device {
 
         super::Texture {
             raw: vk_image,
+            surface_view: None,
             drop_guard,
             memory,
             format: desc.format,
@@ -1262,34 +1279,42 @@ impl crate::Device for super::Device {
     ) -> Result<super::TextureView, crate::DeviceError> {
         let subresource_range = conv::map_subresource_range(&desc.range, texture.format);
         let raw_format = self.shared.private_caps.map_texture_format(desc.format);
-        let mut vk_info = vk::ImageViewCreateInfo::default()
-            .flags(vk::ImageViewCreateFlags::empty())
-            .image(texture.raw)
-            .view_type(conv::map_view_dimension(desc.dimension))
-            .format(raw_format)
-            .subresource_range(subresource_range);
         let layers =
             NonZeroU32::new(subresource_range.layer_count).expect("Unexpected zero layer count");
-
-        let mut image_view_info;
-        if self.shared.private_caps.image_view_usage && !desc.usage.is_empty() {
-            image_view_info =
-                vk::ImageViewUsageCreateInfo::default().usage(conv::map_texture_usage(desc.usage));
-            vk_info = vk_info.push_next(&mut image_view_info);
-        }
-
-        let raw = unsafe { self.shared.raw.create_image_view(&vk_info, None) }
-            .map_err(super::map_host_device_oom_and_ioca_err)?;
-
-        if let Some(label) = desc.label {
-            unsafe { self.shared.set_object_name(raw, label) };
-        }
-
-        let identity = self.shared.texture_view_identity_factory.next();
+        let surface_view = texture.surface_view.filter(|_| {
+            desc.format == texture.format
+                && (desc.usage.is_empty() || desc.usage == wgt::TextureUses::COLOR_TARGET)
+                && desc.dimension == wgt::TextureViewDimension::D2
+                && subresource_range.aspect_mask == vk::ImageAspectFlags::COLOR
+                && subresource_range.base_mip_level == 0
+                && subresource_range.base_array_layer == 0
+                && matches!(subresource_range.level_count, 1 | vk::REMAINING_MIP_LEVELS)
+                && matches!(
+                    subresource_range.layer_count,
+                    1 | vk::REMAINING_ARRAY_LAYERS
+                )
+        });
+        let super::IdentifiedTextureView { raw, identity } = if let Some(view) = surface_view {
+            view
+        } else {
+            let mut info = vk::ImageViewCreateInfo::default()
+                .image(texture.raw)
+                .view_type(conv::map_view_dimension(desc.dimension))
+                .format(raw_format)
+                .subresource_range(subresource_range);
+            let mut image_view_info;
+            if self.shared.private_caps.image_view_usage && !desc.usage.is_empty() {
+                image_view_info = vk::ImageViewUsageCreateInfo::default()
+                    .usage(conv::map_texture_usage(desc.usage));
+                info = info.push_next(&mut image_view_info);
+            }
+            unsafe { self.shared.create_identified_image_view(&info, desc.label) }?
+        };
 
         self.counters.texture_views.add(1);
 
         Ok(super::TextureView {
+            owned_by_swapchain: surface_view.is_some(),
             raw_texture: texture.raw,
             raw,
             _layers: layers,
@@ -1302,7 +1327,9 @@ impl crate::Device for super::Device {
         })
     }
     unsafe fn destroy_texture_view(&self, view: super::TextureView) {
-        unsafe { self.shared.raw.destroy_image_view(view.raw, None) };
+        if !view.owned_by_swapchain {
+            unsafe { self.shared.raw.destroy_image_view(view.raw, None) };
+        }
 
         self.counters.texture_views.sub(1);
     }

@@ -57,7 +57,10 @@ impl super::CommandEncoder {
         key: super::FramebufferKey,
     ) -> Result<vk::Framebuffer, crate::DeviceError> {
         Ok(match self.framebuffers.entry(key) {
-            Entry::Occupied(e) => *e.get(),
+            Entry::Occupied(mut e) => {
+                e.get_mut().idle_resets = 0;
+                e.get().raw
+            }
             Entry::Vacant(e) => {
                 let super::FramebufferKey {
                     raw_pass,
@@ -73,8 +76,13 @@ impl super::CommandEncoder {
                     .layers(extent.depth_or_array_layers)
                     .attachments(attachment_views);
 
-                let raw = unsafe { self.device.raw.create_framebuffer(&vk_info, None).unwrap() };
-                *e.insert(raw)
+                let raw = unsafe { self.device.raw.create_framebuffer(&vk_info, None) }
+                    .map_err(super::map_host_device_oom_err)?;
+                e.insert(super::CachedFramebuffer {
+                    raw,
+                    idle_resets: 0,
+                });
+                raw
             }
         })
     }
@@ -181,10 +189,19 @@ impl crate::CommandEncoder for super::CommandEncoder {
         self.free
             .extend(cmd_bufs.into_iter().map(|cmd_buf| cmd_buf.raw));
         self.free.append(&mut self.discarded);
-        // Delete framebuffers from the framebuffer cache
-        for (_, framebuffer) in self.framebuffers.drain() {
-            unsafe { self.device.raw.destroy_framebuffer(framebuffer, None) };
-        }
+        // Only reset_all guarantees every submission from this encoder has retired.
+        // Identities in FramebufferKey prevent hits on recycled image-view handles.
+        let mut remaining = if cfg!(target_os = "android") { 64 } else { 0 };
+        self.framebuffers.retain(|_, fb| {
+            if remaining > 0 && fb.idle_resets < 8 {
+                remaining -= 1;
+                fb.idle_resets += 1;
+                true
+            } else {
+                unsafe { self.device.raw.destroy_framebuffer(fb.raw, None) };
+                false
+            }
+        });
         let _ = unsafe {
             self.device
                 .raw
@@ -867,7 +884,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
 
         let raw_pass = self.device.make_render_pass(rp_key).unwrap();
         fb_key.raw_pass = raw_pass;
-        let raw_framebuffer = self.make_framebuffer(fb_key).unwrap();
+        let raw_framebuffer = self.make_framebuffer(fb_key)?;
 
         let vk_info = vk::RenderPassBeginInfo::default()
             .render_pass(raw_pass)

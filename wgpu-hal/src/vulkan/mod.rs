@@ -820,6 +820,7 @@ pub struct Texture {
     format: wgt::TextureFormat,
     copy_size: crate::CopyExtent,
     identity: ResourceIdentity<vk::Image>,
+    surface_view: Option<IdentifiedTextureView>,
 
     // The `drop_guard` field must be the last field of this struct so it is dropped last.
     // Do not add new fields after it.
@@ -847,6 +848,7 @@ impl Texture {
 
 #[derive(Debug)]
 pub struct TextureView {
+    owned_by_swapchain: bool,
     raw_texture: vk::Image,
     raw: vk::ImageView,
     _layers: NonZeroU32,
@@ -1016,6 +1018,11 @@ struct FramebufferKey {
     extent: wgt::Extent3d,
 }
 
+struct CachedFramebuffer {
+    raw: vk::Framebuffer,
+    idle_resets: u8,
+}
+
 impl FramebufferKey {
     fn push_view(&mut self, view: IdentifiedTextureView) {
         self.attachment_identities.push(view.identity);
@@ -1024,7 +1031,7 @@ impl FramebufferKey {
 }
 
 /// A texture view paired with its identity.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 struct IdentifiedTextureView {
     raw: vk::ImageView,
     identity: ResourceIdentity<vk::ImageView>,
@@ -1080,7 +1087,7 @@ pub struct CommandEncoder {
     /// the given pool & location.
     end_of_pass_timer_query: Option<(vk::QueryPool, u32)>,
 
-    framebuffers: FastHashMap<FramebufferKey, vk::Framebuffer>,
+    framebuffers: FastHashMap<FramebufferKey, CachedFramebuffer>,
     temp_texture_views: FastHashMap<TempTextureViewKey, IdentifiedTextureView>,
 
     counters: Arc<wgt::HalCounters>,
@@ -1108,7 +1115,7 @@ impl Drop for CommandEncoder {
         }
 
         for (_, fb) in self.framebuffers.drain() {
-            unsafe { self.device.raw.destroy_framebuffer(fb, None) };
+            unsafe { self.device.raw.destroy_framebuffer(fb.raw, None) };
         }
 
         for (_, view) in self.temp_texture_views.drain() {
